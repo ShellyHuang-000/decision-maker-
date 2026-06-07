@@ -1,0 +1,3216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="一纸决定是一个基于摄像头手势识别的纸团抽签小工具，支持场景切换、答案池管理和分享卡片生成。">
+  <meta name="theme-color" content="#4a2f1f">
+  <meta property="og:title" content="一纸决定">
+  <meta property="og:description" content="随手抓一团，用三指捏合打开今天的答案。">
+  <meta property="og:image" content="./assets/app-icon.png">
+  <title>一纸决定</title>
+  <link rel="icon" type="image/png" href="./assets/app-icon.png">
+  <link rel="apple-touch-icon" href="./assets/app-icon.png">
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #1f2528;
+      --paper: #f4f1e8;
+      --paper-edge: #d6d0c0;
+      --teal: #58c7be;
+      --coral: #ee7d63;
+      --amber: #f2c45b;
+      --surface: #22272a;
+      --panel: rgba(20, 25, 27, 0.72);
+      --font-brand: "Source Han Serif SC", "Noto Serif SC", "Songti SC", serif;
+      --font-ui: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif;
+      --font-answer: "LXGW WenKai", "Kaiti SC", "STKaiti", serif;
+      --color-text-primary: #3B2B22;
+      --color-text-secondary: rgba(59, 43, 34, 0.68);
+      --color-text-light: #F6EFE5;
+      --color-text-light-muted: rgba(246, 239, 229, 0.72);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 22% 12%, rgba(238, 125, 99, 0.20), transparent 28rem),
+        radial-gradient(circle at 84% 76%, rgba(88, 199, 190, 0.18), transparent 30rem),
+        linear-gradient(145deg, #2a3030, #181d1e 62%, #101415);
+      font-family: var(--font-ui);
+      letter-spacing: 0;
+    }
+
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 1;
+      background: radial-gradient(
+        circle at center,
+        rgba(255, 230, 190, 0.08),
+        rgba(0, 0, 0, 0.18)
+      );
+      pointer-events: none;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      touch-action: none;
+      cursor: none;
+    }
+
+    .camera-card {
+      position: fixed;
+      right: 32px;
+      top: 90px;
+      z-index: 4;
+      display: none;
+      width: 220px;
+      padding: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 8px;
+      background: rgba(32, 25, 18, 0.62);
+      color: rgba(248, 245, 236, 0.88);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(18px);
+      pointer-events: auto;
+    }
+
+    .camera-card.is-expanded {
+      display: block;
+    }
+
+    .camera-lines {
+      display: grid;
+      gap: 4px;
+      margin-bottom: 8px;
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    .camera-lines strong {
+      font-size: 13px;
+      color: rgba(255, 239, 204, 0.94);
+    }
+
+    .camera-toggle {
+      width: 100%;
+      height: 32px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(248, 245, 236, 0.92);
+      font: 500 13px/18px var(--font-ui);
+      cursor: pointer;
+    }
+
+    .camera-toggle:focus {
+      outline: none;
+      border-color: rgba(249, 220, 155, 0.66);
+      box-shadow: 0 0 0 3px rgba(249, 220, 155, 0.14);
+    }
+
+    #camera {
+      display: none;
+      width: 100%;
+      max-width: 200px;
+      margin-top: 9px;
+      aspect-ratio: 4 / 3;
+      object-fit: cover;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      transform: scaleX(-1);
+      opacity: 0.62;
+      filter: saturate(0.78) contrast(1.04);
+      box-shadow: 0 14px 34px rgba(0, 0, 0, 0.26);
+      background: rgba(255, 255, 255, 0.05);
+      pointer-events: none;
+    }
+
+    .camera-card.is-expanded #camera {
+      display: block;
+    }
+
+    .gesture-cursor {
+      --cursor-x: -100px;
+      --cursor-y: -100px;
+      position: fixed;
+      left: 0;
+      top: 0;
+      z-index: 7;
+      width: 42px;
+      height: 42px;
+      pointer-events: none;
+      opacity: 0;
+      transform: translate3d(var(--cursor-x), var(--cursor-y), 0) translate(-50%, -50%) scale(0.92);
+      transition:
+        opacity 120ms ease,
+        transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+        filter 180ms ease;
+      filter: drop-shadow(0 0 12px rgba(244, 205, 124, 0.32));
+      will-change: transform, opacity;
+    }
+
+    .gesture-cursor::before,
+    .gesture-cursor::after {
+      content: "";
+      position: absolute;
+    }
+
+    .gesture-cursor::before {
+      inset: 1px;
+      opacity: 0.72;
+      background: center / contain no-repeat url("data:image/svg+xml,%3Csvg width='96' height='96' viewBox='0 0 96 96' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M35 46V21c0-4 3-7 7-7s7 3 7 7v20-27c0-4 3-7 7-7s7 3 7 7v29-21c0-4 3-7 7-7s7 3 7 7v31l3-7c2-4 6-6 10-4 4 2 5 6 3 10l-10 24c-4 10-13 16-24 16H47c-10 0-18-5-23-13L8 50c-2-4-1-8 3-10 3-2 7-1 10 2l14 18V46z' fill='rgba(255,226,174,0.56)' stroke='rgba(117,72,36,0.72)' stroke-width='5' stroke-linejoin='round' stroke-linecap='round'/%3E%3Cpath d='M42 17c3 2 4 6 4 10v18M56 10c3 2 4 6 4 11v25M70 19c3 2 4 6 4 11v24' fill='none' stroke='rgba(255,248,226,0.42)' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E");
+      filter:
+        drop-shadow(0 8px 8px rgba(50, 25, 8, 0.34))
+        drop-shadow(0 0 12px rgba(255, 222, 155, 0.28));
+    }
+
+    .gesture-cursor::after {
+      inset: 4px;
+      border-radius: 50%;
+      border: 1px solid rgba(255, 230, 164, 0.38);
+      background: rgba(255, 222, 155, 0.06);
+      box-shadow: 0 0 18px rgba(255, 222, 155, 0.24);
+      transform: scale(1.1);
+    }
+
+    .gesture-cursor.is-visible {
+      opacity: 1;
+    }
+
+    .gesture-cursor.is-hover {
+      transform: translate3d(var(--cursor-x), var(--cursor-y), 0) translate(-50%, -50%) scale(1.08) rotate(-4deg);
+      filter: drop-shadow(0 0 18px rgba(247, 215, 145, 0.50));
+    }
+
+    .gesture-cursor.is-hover::before {
+      opacity: 0.88;
+      filter:
+        drop-shadow(0 9px 9px rgba(50, 25, 8, 0.38))
+        drop-shadow(0 0 18px rgba(255, 222, 155, 0.44));
+    }
+
+    .gesture-cursor.is-grabbing {
+      transform: translate3d(var(--cursor-x), var(--cursor-y), 0) translate(-50%, -50%) scale(0.82) rotate(-13deg);
+      filter: drop-shadow(0 0 24px rgba(255, 224, 151, 0.70));
+    }
+
+    .gesture-cursor.is-grabbing::before {
+      opacity: 0.96;
+      filter:
+        drop-shadow(0 10px 10px rgba(50, 25, 8, 0.42))
+        drop-shadow(0 0 22px rgba(255, 224, 151, 0.62));
+    }
+
+    .gesture-cursor.is-grabbing::after {
+      inset: 10px;
+      border-color: rgba(255, 240, 198, 0.82);
+      background: rgba(255, 224, 151, 0.16);
+    }
+
+    .hud {
+      position: fixed;
+      top: 18px;
+      left: 24px;
+      right: 24px;
+      z-index: 6;
+      display: grid;
+      grid-template-columns: minmax(170px, 1fr) minmax(330px, auto) minmax(280px, 1fr);
+      align-items: center;
+      gap: 16px;
+      min-height: 58px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+      background: rgba(42, 29, 19, 0.66);
+      box-shadow: 0 20px 58px rgba(31, 16, 8, 0.34);
+      backdrop-filter: blur(18px) saturate(1.12);
+      pointer-events: none;
+      color: rgba(246, 244, 236, 0.92);
+      text-shadow: 0 1px 18px rgba(0, 0, 0, 0.36);
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      justify-content: flex-end;
+      pointer-events: auto;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-width: 0;
+      width: fit-content;
+      padding: 7px 16px 7px 14px;
+      border-radius: 16px;
+      pointer-events: auto;
+      transition: background 180ms ease;
+    }
+
+    .brand:hover {
+      background: rgba(255, 255, 255, 0.045);
+    }
+
+    .paper-logo-icon {
+      width: 28px;
+      height: 28px;
+      flex: 0 0 auto;
+      filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.24));
+      transition: transform 200ms ease, filter 200ms ease;
+    }
+
+    .brand:hover .paper-logo-icon {
+      transform: scale(1.05) rotate(-3deg);
+      filter: drop-shadow(0 5px 9px rgba(0, 0, 0, 0.30));
+    }
+
+    .paper-shape {
+      fill: #f3eee6;
+    }
+
+    .paper-shadow {
+      fill: rgba(166, 151, 132, 0.42);
+    }
+
+    .paper-fold {
+      fill: none;
+      stroke: #d8cec0;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.86;
+    }
+
+    .paper-highlight {
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.86);
+      stroke-width: 2.4;
+      stroke-linecap: round;
+      opacity: 0.92;
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 1px;
+      min-width: 0;
+    }
+
+    .logo-title {
+      min-width: 0;
+      font-family: var(--font-brand);
+      font-size: 20px;
+      line-height: 24px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      color: var(--color-text-light);
+    }
+
+    .logo-subtitle {
+      font-family: var(--font-ui);
+      font-size: 11px;
+      line-height: 14px;
+      font-weight: 400;
+      white-space: nowrap;
+      color: var(--color-text-light-muted);
+    }
+
+    .status {
+      max-width: 170px;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      line-height: 18px;
+      font-weight: 400;
+      color: rgba(247, 240, 232, 0.74);
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .scene-switcher {
+      justify-self: center;
+      min-width: min(420px, 34vw);
+      display: grid;
+      grid-template-columns: auto minmax(190px, 1fr);
+      align-items: center;
+      gap: 12px;
+      padding: 7px 10px 7px 16px;
+      border: 1px solid rgba(255, 223, 162, 0.32);
+      border-radius: 999px;
+      background:
+        radial-gradient(circle at 20% 0%, rgba(255, 223, 162, 0.18), transparent 46%),
+        rgba(255, 246, 226, 0.08);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.05) inset,
+        0 12px 30px rgba(28, 14, 6, 0.20),
+        0 0 34px rgba(241, 196, 112, 0.12);
+      backdrop-filter: blur(14px);
+      pointer-events: auto;
+    }
+
+    .scene-kicker {
+      font-family: var(--font-ui);
+      font-size: 12px;
+      line-height: 16px;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      color: rgba(255, 226, 173, 0.74);
+      white-space: nowrap;
+    }
+
+    .scene-select {
+      height: 40px;
+      width: 100%;
+      min-width: 0;
+      padding: 0 34px 0 16px;
+      border: 1px solid rgba(255, 255, 255, 0.20);
+      border-radius: 999px;
+      background: rgba(40, 28, 19, 0.48);
+      color: var(--color-text-light);
+      font-family: var(--font-ui);
+      font-size: 17px;
+      line-height: 22px;
+      font-weight: 650;
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 8px 20px rgba(0, 0, 0, 0.16);
+      backdrop-filter: blur(12px);
+      outline: none;
+      cursor: pointer;
+    }
+
+    .scene-select:focus {
+      border-color: rgba(255, 226, 154, 0.78);
+      box-shadow:
+        0 0 0 3px rgba(255, 210, 128, 0.20),
+        0 12px 34px rgba(0, 0, 0, 0.20);
+    }
+
+    .manage-button,
+    .toolbar-button,
+    .manager-button {
+      height: 40px;
+      padding: 0 13px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.09);
+      color: var(--color-text-light);
+      font-family: var(--font-ui);
+      font-size: 15px;
+      line-height: 20px;
+      font-weight: 500;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+      backdrop-filter: blur(12px);
+      cursor: pointer;
+    }
+
+    .manage-button:focus,
+    .toolbar-button:focus,
+    .manager-button:focus,
+    .manager-input:focus,
+    .manager-select:focus {
+      outline: none;
+      border-color: rgba(103, 242, 224, 0.70);
+      box-shadow: 0 0 0 3px rgba(94, 244, 223, 0.16);
+    }
+
+    .manager-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 8;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(14, 11, 8, 0.48);
+      backdrop-filter: blur(8px);
+    }
+
+    .manager-backdrop[hidden] {
+      display: none;
+    }
+
+    .manager-panel {
+      width: min(860px, calc(100vw - 36px));
+      max-height: min(720px, calc(100vh - 36px));
+      display: flex;
+      flex-direction: column;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      background: rgba(29, 26, 22, 0.94);
+      color: rgba(248, 245, 236, 0.92);
+      box-shadow: 0 32px 90px rgba(0, 0, 0, 0.44);
+      overflow: hidden;
+    }
+
+    .manager-header,
+    .manager-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+    }
+
+    .manager-footer {
+      border-top: 1px solid rgba(255, 255, 255, 0.10);
+      border-bottom: 0;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+
+    .manager-title {
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .manager-body {
+      display: grid;
+      grid-template-columns: 230px 1fr;
+      gap: 16px;
+      padding: 16px;
+      overflow: auto;
+    }
+
+    .manager-side,
+    .manager-main,
+    .answer-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .manager-label {
+      display: grid;
+      gap: 6px;
+      font-size: 12px;
+      color: rgba(248, 245, 236, 0.68);
+    }
+
+    .manager-input,
+    .manager-select {
+      width: 100%;
+      min-height: 38px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(248, 245, 236, 0.94);
+      font: 500 14px/20px var(--font-ui);
+      box-sizing: border-box;
+    }
+
+    .manager-input {
+      padding: 9px 10px;
+    }
+
+    .manager-select {
+      padding: 0 9px;
+    }
+
+    .answer-row,
+    .answer-add-row,
+    .scene-name-row {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .answer-row .manager-input {
+      min-height: 42px;
+    }
+
+    .manager-danger {
+      color: rgba(255, 220, 214, 0.96);
+      border-color: rgba(255, 139, 118, 0.34);
+      background: rgba(112, 42, 33, 0.34);
+    }
+
+    .manager-primary {
+      color: rgba(24, 38, 34, 0.96);
+      background: rgba(111, 236, 210, 0.86);
+      border-color: rgba(173, 255, 238, 0.66);
+    }
+
+    .manager-muted {
+      color: rgba(248, 245, 236, 0.76);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .answer-actions {
+      position: fixed;
+      left: 50%;
+      top: min(76vh, calc(50vh + 245px));
+      z-index: 6;
+      display: flex;
+      gap: 10px;
+      padding: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 999px;
+      background: rgba(48, 33, 22, 0.64);
+      box-shadow: 0 18px 48px rgba(31, 16, 8, 0.32);
+      backdrop-filter: blur(18px);
+      transform: translateX(-50%);
+      pointer-events: auto;
+    }
+
+    .answer-actions[hidden] {
+      display: none;
+    }
+
+    .answer-actions .toolbar-button.is-gesture-hover {
+      border-color: rgba(255, 229, 166, 0.82);
+      background: rgba(255, 218, 142, 0.18);
+      box-shadow:
+        0 0 0 3px rgba(255, 221, 150, 0.14),
+        0 0 26px rgba(255, 218, 142, 0.34),
+        inset 0 1px 0 rgba(255, 255, 255, 0.16);
+      transform: translateY(-1px);
+    }
+
+    .share-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 9;
+      display: grid;
+      place-items: center;
+      padding: 18px;
+      background: rgba(14, 11, 8, 0.52);
+      backdrop-filter: blur(10px);
+    }
+
+    .share-backdrop[hidden] {
+      display: none;
+    }
+
+    .share-panel {
+      width: min(560px, calc(100vw - 36px));
+      max-height: calc(100vh - 36px);
+      display: grid;
+      gap: 14px;
+      padding: 16px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      background: rgba(35, 27, 20, 0.94);
+      box-shadow: 0 32px 90px rgba(0, 0, 0, 0.44);
+      overflow: auto;
+    }
+
+    .share-card {
+      width: min(420px, 100%);
+      aspect-ratio: 4 / 5;
+      justify-self: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 34px 32px 30px;
+      border: 1px solid rgba(112, 94, 68, 0.13);
+      border-radius: 26px;
+      background:
+        linear-gradient(128deg, rgba(255, 255, 255, 0.68), rgba(255, 255, 255, 0) 32%),
+        radial-gradient(circle at 78% 12%, rgba(255, 236, 196, 0.42), transparent 24%),
+        radial-gradient(circle at 18% 92%, rgba(211, 192, 154, 0.16), transparent 34%),
+        linear-gradient(145deg, #fffaf0 0%, #f7f0e4 45%, #eee2d0 100%);
+      color: #2d251c;
+      box-shadow:
+        0 28px 64px rgba(49, 31, 14, 0.26),
+        0 1px 0 rgba(255, 255, 255, 0.70) inset,
+        0 -24px 50px rgba(173, 144, 101, 0.075) inset;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .share-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(118deg, transparent 0 21%, rgba(122, 102, 73, 0.035) 21.2%, transparent 21.7% 54%, rgba(255, 255, 255, 0.26) 54.2%, transparent 54.7%),
+        linear-gradient(28deg, transparent 0 64%, rgba(122, 102, 73, 0.030) 64.2%, transparent 64.8%),
+        repeating-linear-gradient(8deg, rgba(88, 70, 47, 0.018) 0 1px, transparent 1px 9px),
+        repeating-linear-gradient(96deg, rgba(255, 255, 255, 0.18) 0 1px, transparent 1px 13px),
+        radial-gradient(circle at 35% 46%, rgba(145, 122, 86, 0.030), transparent 26%);
+      pointer-events: none;
+      mix-blend-mode: multiply;
+    }
+
+    .share-card::after {
+      content: "";
+      position: absolute;
+      left: 28px;
+      right: 28px;
+      top: 50%;
+      height: 1px;
+      background:
+        linear-gradient(90deg, transparent, rgba(121, 99, 67, 0.16), transparent);
+      opacity: 0.62;
+      pointer-events: none;
+      mix-blend-mode: multiply;
+    }
+
+    .share-card > * {
+      position: relative;
+      z-index: 2;
+    }
+
+    .share-card-header {
+      position: relative;
+      padding-bottom: 18px;
+    }
+
+    .share-card-header::before {
+      content: "";
+      position: absolute;
+      right: 2px;
+      top: 1px;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.70), rgba(218, 204, 184, 0.30)),
+        conic-gradient(from 28deg, #f8f1e6, #d8cab9, #fffaf1, #c9bba9, #f8f1e6);
+      box-shadow:
+        inset -4px -5px 8px rgba(96, 75, 48, 0.14),
+        inset 3px 3px 7px rgba(255, 255, 255, 0.70);
+      opacity: 0.74;
+    }
+
+    .share-card-header::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(98, 78, 51, 0.16), transparent 72%);
+    }
+
+    .share-title {
+      font-family: var(--font-brand);
+      font-size: 22px;
+      line-height: 28px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: #3B2B22;
+    }
+
+    .share-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 10px;
+      font-family: var(--font-ui);
+      font-size: 14px;
+      line-height: 20px;
+      font-weight: 400;
+      color: rgba(59, 43, 34, 0.62);
+    }
+
+    .share-answer {
+      margin: 0;
+      font-family: var(--font-answer);
+      font-size: clamp(34px, 7vw, 42px);
+      line-height: 1.5;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-align: center;
+      color: #2F231C;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.42);
+      position: relative;
+      z-index: 1;
+    }
+
+    .share-answer-wrap {
+      display: grid;
+      place-items: center;
+      min-height: 52%;
+      padding: 28px 0 24px;
+      position: relative;
+    }
+
+    .share-answer-wrap::before {
+      content: "";
+      position: absolute;
+      inset: 12px 4px;
+      border-radius: 22px;
+      background:
+        radial-gradient(circle at 48% 50%, rgba(255, 255, 255, 0.36), transparent 46%),
+        linear-gradient(132deg, rgba(145, 122, 86, 0.035), transparent 38% 68%, rgba(255, 255, 255, 0.24));
+      border: 1px solid rgba(122, 102, 73, 0.055);
+      pointer-events: none;
+    }
+
+    .share-answer-wrap::after {
+      content: "";
+      position: absolute;
+      left: 20%;
+      right: 20%;
+      bottom: 12px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(122, 102, 73, 0.13), transparent);
+      pointer-events: none;
+    }
+
+    .share-source {
+      font-family: var(--font-ui);
+      font-size: 12px;
+      line-height: 18px;
+      font-weight: 400;
+      color: rgba(59, 43, 34, 0.48);
+      text-align: right;
+    }
+
+    .share-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .share-actions .toolbar-button {
+      min-width: 92px;
+    }
+
+    .permission {
+      position: fixed;
+      left: 16px;
+      bottom: 16px;
+      width: min(380px, calc(100vw - 32px));
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 260ms ease;
+    }
+
+    .permission.is-visible {
+      opacity: 1;
+    }
+
+    .permission-inner {
+      padding: 14px 16px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 8px;
+      background: rgba(18, 21, 22, 0.82);
+      color: rgba(248, 245, 236, 0.92);
+      box-shadow: 0 26px 70px rgba(0, 0, 0, 0.38);
+      backdrop-filter: blur(18px);
+      text-align: left;
+    }
+
+    .permission strong {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 14px;
+    }
+
+    .permission span {
+      display: block;
+      font-size: 12px;
+      line-height: 1.45;
+      color: rgba(248, 245, 236, 0.72);
+    }
+
+    @media (max-width: 768px) {
+      .camera-card {
+        width: min(220px, calc(100vw - 24px));
+        right: 12px;
+        top: 136px;
+      }
+
+      .hud {
+        top: 12px;
+        left: 12px;
+        right: 12px;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        min-height: 0;
+        padding: 10px;
+        border-radius: 18px;
+      }
+
+      .status {
+        max-width: calc(100vw - 24px);
+        text-align: left;
+      }
+
+      .controls {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+
+      .scene-select {
+        width: 100%;
+        max-width: none;
+        font-size: 14px;
+        line-height: 18px;
+      }
+
+      .scene-switcher {
+        justify-self: stretch;
+        min-width: 0;
+        grid-template-columns: 1fr;
+        gap: 5px;
+        padding: 9px 10px;
+        border-radius: 18px;
+      }
+
+      .scene-kicker {
+        padding-left: 4px;
+        font-size: 11px;
+        line-height: 14px;
+      }
+
+      .paper-logo-icon {
+        width: 24px;
+        height: 24px;
+      }
+
+      .brand {
+        padding: 6px 12px;
+        gap: 8px;
+      }
+
+      .logo-title {
+        font-size: 18px;
+        line-height: 22px;
+      }
+
+      .logo-subtitle {
+        display: none;
+      }
+
+      .toolbar-button,
+      .manage-button,
+      .manager-button {
+        font-size: 14px;
+        line-height: 18px;
+      }
+
+      .manager-body {
+        grid-template-columns: 1fr;
+      }
+
+      .answer-row,
+      .answer-add-row,
+      .scene-name-row {
+        grid-template-columns: 1fr;
+      }
+
+      .answer-actions {
+        top: auto;
+        bottom: 18px;
+        max-width: calc(100vw - 24px);
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+
+      .share-panel {
+        padding: 12px;
+      }
+
+      .share-card {
+        padding: 24px 20px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="stage" aria-label="手势控制的纸团交互画布"></canvas>
+  <div class="gesture-cursor" id="gestureCursor" aria-hidden="true"></div>
+  <div class="hud">
+    <div class="brand">
+      <svg class="paper-logo-icon" viewBox="0 0 64 64" aria-hidden="true">
+        <path class="paper-shadow" d="M17 50c-6-5-8-16-4-25 4-10 12-16 23-15 10 1 18 8 20 18 2 11-5 23-16 27-8 3-17 1-23-5Z" />
+        <path class="paper-shape" d="M15 45c-5-5-7-15-3-24 4-9 13-15 23-14 10 1 17 7 19 17 2 11-4 22-15 26-8 3-18 1-24-5Z" />
+        <path class="paper-fold" d="M15 24l14 6 7-18" />
+        <path class="paper-fold" d="M29 30l-6 16 16-7 14 5" />
+        <path class="paper-fold" d="M36 12l1 18 15-6" />
+        <path class="paper-fold" d="M37 30l2 9-10-9" />
+        <path class="paper-highlight" d="M17 21c5-7 13-10 22-8" />
+        <path class="paper-highlight" d="M20 43c5 4 12 5 19 2" />
+      </svg>
+      <div class="brand-copy">
+        <div class="logo-title">一纸决定</div>
+        <div class="logo-subtitle">随手抓一团</div>
+      </div>
+    </div>
+    <div class="scene-switcher" aria-label="当前抽签场景">
+      <span class="scene-kicker">当前场景</span>
+      <select class="scene-select" id="sceneSelect" aria-label="选择纸团场景"></select>
+    </div>
+    <div class="controls">
+      <button class="toolbar-button" id="cameraToggle" type="button">预览选择</button>
+      <button class="toolbar-button" id="fullscreenButton" type="button">全屏</button>
+      <button class="manage-button" id="manageButton" type="button">场景编辑</button>
+      <div class="status" id="status">正在连接摄像头...</div>
+    </div>
+  </div>
+  <div class="camera-card" id="cameraCard">
+    <div class="camera-lines">
+      <strong id="modeStatus">点击模式</strong>
+      <span id="cameraStatus">摄像头未开启</span>
+    </div>
+    <video id="camera" playsinline muted></video>
+  </div>
+  <div class="answer-actions" id="answerActions" hidden>
+    <button class="toolbar-button" id="redrawButton" type="button">再抓一团</button>
+    <button class="toolbar-button" id="shareCardButton" type="button">生成分享卡片</button>
+  </div>
+  <div class="share-backdrop" id="shareBackdrop" hidden>
+    <section class="share-panel" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+      <div class="share-card" id="shareCard">
+        <header class="share-card-header">
+          <div class="share-title" id="shareTitle">一纸决定</div>
+          <div class="share-meta">
+            <span id="shareScene">答案之书</span>
+            <span id="shareDateTime">--</span>
+          </div>
+        </header>
+        <div class="share-answer-wrap">
+          <div class="share-answer" id="shareAnswer">答案</div>
+        </div>
+        <footer class="share-source" id="shareSource">来源：一纸决定</footer>
+      </div>
+      <div class="share-actions">
+        <button class="toolbar-button" id="saveShareButton" type="button">保存图片</button>
+        <button class="toolbar-button" id="systemShareButton" type="button">系统分享</button>
+        <button class="toolbar-button" id="closeShareButton" type="button">关闭</button>
+      </div>
+    </section>
+  </div>
+  <div class="manager-backdrop" id="managerBackdrop" hidden>
+    <section class="manager-panel" role="dialog" aria-modal="true" aria-labelledby="managerTitle">
+      <div class="manager-header">
+        <div class="manager-title" id="managerTitle">场景与答案管理</div>
+        <button class="manager-button manager-muted" id="closeManagerButton" type="button">关闭</button>
+      </div>
+      <div class="manager-body">
+        <div class="manager-side">
+          <label class="manager-label">
+            当前场景
+            <select class="manager-select" id="managerSceneSelect"></select>
+          </label>
+          <button class="manager-button" id="addSceneButton" type="button">新增场景</button>
+          <button class="manager-button manager-danger" id="deleteSceneButton" type="button">删除场景</button>
+        </div>
+        <div class="manager-main">
+          <label class="manager-label">
+            场景名称
+            <div class="scene-name-row">
+              <input class="manager-input" id="sceneNameInput" type="text" maxlength="24">
+              <button class="manager-button" id="renameSceneButton" type="button">修改场景名称</button>
+            </div>
+          </label>
+          <div class="answer-list" id="answerList"></div>
+          <div class="answer-add-row">
+            <input class="manager-input" id="newAnswerInput" type="text" placeholder="输入新答案">
+            <button class="manager-button" id="addAnswerButton" type="button">新增答案</button>
+          </div>
+        </div>
+      </div>
+      <div class="manager-footer">
+        <button class="manager-button manager-danger" id="restoreDefaultButton" type="button">恢复默认答案</button>
+        <button class="manager-button manager-primary" id="saveScenesButton" type="button">保存修改</button>
+      </div>
+    </section>
+  </div>
+  <div class="permission" id="permission">
+    <div class="permission-inner">
+      <strong>摄像头暂时不可用</strong>
+      <span>页面会保留鼠标预览模式；换到可用摄像头的浏览器并允许权限后即可启用手势。</span>
+    </div>
+  </div>
+
+  <script type="module">
+    import {
+      FilesetResolver,
+      HandLandmarker
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+    const canvas = document.getElementById("stage");
+    const ctx = canvas.getContext("2d", { alpha: false });
+    const video = document.getElementById("camera");
+    const cameraCard = document.getElementById("cameraCard");
+    const cameraToggle = document.getElementById("cameraToggle");
+    const fullscreenButton = document.getElementById("fullscreenButton");
+    const modeStatus = document.getElementById("modeStatus");
+    const cameraStatus = document.getElementById("cameraStatus");
+    const statusEl = document.getElementById("status");
+    const permission = document.getElementById("permission");
+    const sceneSelect = document.getElementById("sceneSelect");
+    const gestureCursor = document.getElementById("gestureCursor");
+    const manageButton = document.getElementById("manageButton");
+    const answerActions = document.getElementById("answerActions");
+    const redrawButton = document.getElementById("redrawButton");
+    const shareCardButton = document.getElementById("shareCardButton");
+    const shareBackdrop = document.getElementById("shareBackdrop");
+    const shareCard = document.getElementById("shareCard");
+    const shareScene = document.getElementById("shareScene");
+    const shareDateTime = document.getElementById("shareDateTime");
+    const shareAnswer = document.getElementById("shareAnswer");
+    const shareSource = document.getElementById("shareSource");
+    const saveShareButton = document.getElementById("saveShareButton");
+    const systemShareButton = document.getElementById("systemShareButton");
+    const closeShareButton = document.getElementById("closeShareButton");
+    const managerBackdrop = document.getElementById("managerBackdrop");
+    const closeManagerButton = document.getElementById("closeManagerButton");
+    const managerSceneSelect = document.getElementById("managerSceneSelect");
+    const sceneNameInput = document.getElementById("sceneNameInput");
+    const renameSceneButton = document.getElementById("renameSceneButton");
+    const addSceneButton = document.getElementById("addSceneButton");
+    const deleteSceneButton = document.getElementById("deleteSceneButton");
+    const answerList = document.getElementById("answerList");
+    const newAnswerInput = document.getElementById("newAnswerInput");
+    const addAnswerButton = document.getElementById("addAnswerButton");
+    const saveScenesButton = document.getElementById("saveScenesButton");
+    const restoreDefaultButton = document.getElementById("restoreDefaultButton");
+
+    const STORAGE_KEY = "paperBallScenes.v1";
+    const HISTORY_KEY = "paperBallDrawHistory.v1";
+
+    const defaultScenes = {
+      general: {
+        name: "答案之书",
+        tint: "#d8d6c7",
+        answers: ["现在就是合适的时机", "再等等，答案会更清楚", "选择让你心里更轻松的", "大胆一点，这次可以冒险", "答案其实你已经知道了", "不要被表面吸引", "换个方向试试看", "暂时放下，明天再决定", "这件事值得尝试", "今天听纸团的"]
+      },
+      food: {
+        name: "今天吃什么",
+        tint: "#d9c7b4",
+        answers: ["吃米饭套餐，稳妥不出错", "吃面条，热乎一点", "吃麻辣烫，快乐优先", "吃轻食，给身体一个交代", "吃汉堡炸鸡，今天不装自律", "吃日料，精致一点", "吃粥，清淡养胃", "吃火锅，问题都能涮掉", "吃便利店，快速解决", "自己做饭，钱包会感谢你"]
+      },
+      shopping: {
+        name: "买还是不买",
+        tint: "#c8d4c3",
+        answers: ["先放购物车一天", "不买，立省 100%", "可以买，但先设预算", "买刚需，不买情绪", "等打折再说", "只买一件，别加购", "看看余额再谈梦想", "找个平替试试看", "如果用了超过 30 次，就买", "这次别冲动，纸团劝你冷静"]
+      },
+      evening: {
+        name: "今晚做什么",
+        tint: "#c5cada",
+        answers: ["看一部电影", "追两集剧，别通宵", "出门散步 30 分钟", "整理一下房间", "玩游戏放松一下", "看书 20 分钟", "做一顿简单的饭", "洗个热水澡早点睡", "写点东西，清空脑子", "什么都不做，合法放空"]
+      },
+      task: {
+        name: "先做哪件事",
+        tint: "#d5cfbd",
+        answers: ["先做最重要的那件", "先做最简单的那件", "先做最拖延的那件", "先做 10 分钟再说", "先列一个清单", "先回复必要消息", "先整理桌面", "先做能产生收益的事", "先做对未来有帮助的事", "别装忙，先动手"]
+      },
+      mood: {
+        name: "情绪急救",
+        tint: "#c5d7d4",
+        answers: ["喝一杯水，先让身体上线", "出去晒 10 分钟太阳", "暂停刷手机", "洗个热水澡", "听一首喜欢的歌", "写下现在最烦的事", "收拾一小块地方", "找朋友聊两句", "允许自己什么都不做", "早点睡，明天再处理人生"]
+      },
+      weekend: {
+        name: "周末去哪儿",
+        tint: "#d3c8d6",
+        answers: ["去咖啡馆坐坐", "去公园散步", "去电影院", "去书店逛一圈", "去商场随便走走", "去看展览或博物馆", "找一家没去过的小店", "来一场城市漫步", "宅家休息，不内疚", "随机坐一站地铁"]
+      },
+      worker: {
+        name: "打工人建议",
+        tint: "#c8d0d2",
+        answers: ["先喝咖啡，再谈效率", "能明天做的，今天先评估一下", "这事不急，急的是老板", "先保存文件，保命要紧", "不要硬扛，先拆成小任务", "先发个“收到”，争取时间", "今天适合低调发育", "别内耗，工资不包含这部分", "能开会解决的，通常解决不了", "下班之后，人生才开始"]
+      }
+    };
+
+    let scenes = loadScenes();
+    let managerSceneKey = Object.keys(scenes)[0] || "general";
+
+    const state = {
+      width: 0,
+      height: 0,
+      dpr: 1,
+      balls: [],
+      hands: [],
+      previousHands: [],
+      hand: null,
+      previousHand: null,
+      selected: null,
+      grabbed: null,
+      opened: null,
+      trash: null,
+      currentDrawRecord: null,
+      actionHover: null,
+      actionHoverSince: 0,
+      actionLastTriggeredAt: 0,
+      trashShake: 0,
+      activeScene: Object.keys(scenes)[0] || "general",
+      trashCooldownUntil: 0,
+      centerConfirmProgress: 0,
+      pinchStartedAt: 0,
+      lastBlastAt: 0,
+      lastThrowAt: 0,
+      openPalmSince: 0,
+      openPalmLastPoint: null,
+      openPalmBlastUntil: 0,
+      wasOpenPalm: false,
+      wasClasped: false,
+      cameraReady: false,
+      modelReady: false,
+      mouse: { active: false, x: 0, y: 0, down: false, wasDown: false },
+      status: "正在连接摄像头..."
+    };
+
+    const textures = {
+      ball: Object.assign(new Image(), { src: "./assets/crumpled-paper-ball.png" }),
+      sheet: Object.assign(new Image(), { src: "./assets/unfolded-paper-clean.png" }),
+      wood: Object.assign(new Image(), { src: "./assets/wood-table.png" })
+    };
+
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    const FONT_UI = `"PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", sans-serif`;
+    const FONT_ANSWER = `"LXGW WenKai", "Kaiti SC", "STKaiti", serif`;
+    const firstSceneKey = () => Object.keys(scenes)[0] || "general";
+    const currentScene = () => scenes[state.activeScene] || scenes[firstSceneKey()] || { name: "未命名场景", tint: "#d8d6c7", answers: [] };
+    const randomSceneAnswer = () => {
+      const answers = currentScene().answers;
+      return answers.length ? answers[Math.floor(Math.random() * answers.length)] : "这个场景还没有答案";
+    };
+    function cloneScenes(source) {
+      return JSON.parse(JSON.stringify(source));
+    }
+    const escapeHtml = (value) => String(value)
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+
+    function normalizeScenes(input) {
+      if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+      const normalized = {};
+      for (const [rawKey, rawScene] of Object.entries(input)) {
+        if (!rawScene || typeof rawScene !== "object") continue;
+        const key = String(rawKey).replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 36);
+        if (!key) continue;
+        const answers = Array.isArray(rawScene.answers)
+          ? rawScene.answers.map((answer) => String(answer).trim()).filter(Boolean)
+          : [];
+        normalized[key] = {
+          name: String(rawScene.name || "未命名场景").trim().slice(0, 24) || "未命名场景",
+          tint: /^#[0-9a-fA-F]{6}$/.test(rawScene.tint || "") ? rawScene.tint : "#d8d6c7",
+          answers
+        };
+      }
+      return Object.keys(normalized).length ? normalized : null;
+    }
+
+    function loadScenes() {
+      try {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        if (saved) {
+          const parsed = normalizeScenes(JSON.parse(saved));
+          if (parsed) return parsed;
+        }
+      } catch (error) {
+        localStorage.removeItem(STORAGE_KEY);
+      }
+      return cloneScenes(defaultScenes);
+    }
+
+    function saveScenes() {
+      const cleaned = normalizeScenes(scenes);
+      if (cleaned) scenes = cleaned;
+      if (!scenes[state.activeScene]) state.activeScene = firstSceneKey();
+      if (!scenes[managerSceneKey]) managerSceneKey = state.activeScene;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(scenes));
+      state.status = "修改已保存";
+      statusEl.textContent = state.status;
+    }
+
+    function nextTint() {
+      const palette = ["#d8d6c7", "#d9c7b4", "#c8d4c3", "#c5cada", "#d5cfbd", "#c5d7d4", "#d3c8d6", "#c8d0d2", "#d7c7c3", "#c9d2bd"];
+      return palette[Object.keys(scenes).length % palette.length];
+    }
+
+    function makeSceneKey(name) {
+      const base = String(name || "scene").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "scene";
+      let key = base.slice(0, 28);
+      let index = 1;
+      while (scenes[key]) {
+        key = `${base.slice(0, 24)}_${index}`;
+        index += 1;
+      }
+      return key;
+    }
+
+    const normDist = (landmarks, a, b) => {
+      const dx = landmarks[a].x - landmarks[b].x;
+      const dy = landmarks[a].y - landmarks[b].y;
+      return Math.hypot(dx, dy);
+    };
+
+    function resize() {
+      state.dpr = Math.min(window.devicePixelRatio || 1, 2);
+      state.width = window.innerWidth;
+      state.height = window.innerHeight;
+      canvas.width = Math.floor(state.width * state.dpr);
+      canvas.height = Math.floor(state.height * state.dpr);
+      canvas.style.width = `${state.width}px`;
+      canvas.style.height = `${state.height}px`;
+      ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+      if (!state.balls.length) createBalls();
+      else keepBallsInView();
+    }
+
+    function createBalls(options = {}) {
+      const { animate = false } = options;
+      const count = 10;
+      const cx = state.width * 0.5;
+      const cy = state.height * 0.52;
+      const scene = currentScene();
+      state.balls = Array.from({ length: count }, (_, i) => {
+        const ring = Math.sqrt(i / count);
+        const theta = i * 2.399963 + Math.random() * 0.5;
+        const spreadX = state.width * 0.39;
+        const spreadY = state.height * 0.30;
+        const r = 27 + Math.random() * 18;
+        const baseX = cx + Math.cos(theta) * ring * spreadX;
+        const baseY = cy + Math.sin(theta) * ring * spreadY;
+        const startX = animate ? cx + (Math.random() - 0.5) * 90 : baseX + (Math.random() - 0.5) * 46;
+        const startY = animate ? state.height * 0.28 + (Math.random() - 0.5) * 70 : baseY + (Math.random() - 0.5) * 42;
+        const dx = baseX - startX;
+        const dy = baseY - startY;
+        const d = Math.max(1, Math.hypot(dx, dy));
+        return {
+          id: i,
+          x: startX,
+          y: startY,
+          baseX,
+          baseY,
+          vx: animate ? (dx / d) * (6.8 + Math.random() * 2.8) : (Math.random() - 0.5) * 0.12,
+          vy: animate ? (dy / d) * (6.2 + Math.random() * 2.6) : (Math.random() - 0.5) * 0.12,
+          r,
+          angle: Math.random() * Math.PI * 2,
+          spin: animate ? (Math.random() - 0.5) * 0.18 : (Math.random() - 0.5) * 0.02,
+          seed: Math.random() * 1000,
+          note: "",
+          tint: scene.tint,
+          lift: 0,
+          pickAge: 0,
+          air: animate ? 80 + Math.random() * 100 : 0,
+          airVelocity: animate ? -0.08 - Math.random() * 0.05 : 0,
+          settled: false,
+          settleFrames: 0,
+          open: 0,
+          highlight: 0,
+          textureZoom: 0.9 + Math.random() * 0.22,
+          textureX: (Math.random() - 0.5) * 0.08,
+          textureY: (Math.random() - 0.5) * 0.08,
+          crumple: Array.from({ length: 18 }, () => ({
+            a: Math.random() * Math.PI * 2,
+            d: Math.random() * 0.92,
+            len: 0.32 + Math.random() * 0.62,
+            w: 0.5 + Math.random() * 1.4,
+            alpha: 0.10 + Math.random() * 0.22
+          }))
+        };
+      });
+    }
+
+    function keepBallsInView() {
+      for (const ball of state.balls) {
+        ball.x = clamp(ball.x, ball.r + 20, state.width - ball.r - 20);
+        ball.y = clamp(ball.y, ball.r + 56, state.height - ball.r - 20);
+        ball.baseX = clamp(ball.baseX, ball.r + 20, state.width - ball.r - 20);
+        ball.baseY = clamp(ball.baseY, ball.r + 56, state.height - ball.r - 20);
+      }
+    }
+
+    function resetInteractionState() {
+      state.selected = null;
+      state.grabbed = null;
+      state.opened = null;
+      state.trash = null;
+      state.currentDrawRecord = null;
+      state.actionHover = null;
+      state.actionHoverSince = 0;
+      state.actionLastTriggeredAt = 0;
+      state.centerConfirmProgress = 0;
+      state.pinchStartedAt = 0;
+      state.openPalmSince = 0;
+      state.openPalmLastPoint = null;
+      state.openPalmBlastUntil = 0;
+      state.wasOpenPalm = false;
+      state.wasClasped = false;
+      state.trashCooldownUntil = performance.now() + 520;
+      redrawButton.classList.remove("is-gesture-hover");
+      shareCardButton.classList.remove("is-gesture-hover");
+    }
+
+    function switchScene(sceneKey) {
+      if (!scenes[sceneKey] || sceneKey === state.activeScene) return;
+      state.activeScene = sceneKey;
+      sceneSelect.value = sceneKey;
+      managerSceneKey = sceneKey;
+      resetInteractionState();
+      createBalls({ animate: true });
+      state.status = scenes[sceneKey].name;
+      statusEl.textContent = scenes[sceneKey].name;
+      renderManager();
+    }
+
+    function setupSceneSelect() {
+      refreshSceneSelect();
+      sceneSelect.addEventListener("change", () => switchScene(sceneSelect.value));
+    }
+
+    function refreshSceneSelect() {
+      sceneSelect.innerHTML = Object.entries(scenes)
+        .map(([key, scene]) => `<option value="${escapeHtml(key)}">${escapeHtml(scene.name)}</option>`)
+        .join("");
+      if (!scenes[state.activeScene]) state.activeScene = firstSceneKey();
+      sceneSelect.value = state.activeScene;
+    }
+
+    function refreshManagerSceneSelect() {
+      managerSceneSelect.innerHTML = Object.entries(scenes)
+        .map(([key, scene]) => `<option value="${escapeHtml(key)}">${escapeHtml(scene.name)}</option>`)
+        .join("");
+      if (!scenes[managerSceneKey]) managerSceneKey = state.activeScene;
+      managerSceneSelect.value = managerSceneKey;
+    }
+
+    function renderManager() {
+      if (managerBackdrop.hidden) return;
+      refreshManagerSceneSelect();
+      const scene = scenes[managerSceneKey] || currentScene();
+      sceneNameInput.value = scene.name;
+      answerList.innerHTML = scene.answers.map((answer, index) => `
+        <div class="answer-row">
+          <input class="manager-input answer-input" type="text" value="${escapeHtml(answer)}" data-index="${index}" aria-label="答案 ${index + 1}">
+          <button class="manager-button manager-danger answer-delete" type="button" data-index="${index}">删除答案</button>
+        </div>
+      `).join("");
+    }
+
+    function openManager() {
+      managerSceneKey = state.activeScene;
+      managerBackdrop.hidden = false;
+      renderManager();
+      sceneNameInput.focus();
+    }
+
+    function closeManager() {
+      managerBackdrop.hidden = true;
+    }
+
+    function addScene() {
+      const name = window.prompt("新场景名称", "新场景");
+      if (!name || !name.trim()) return;
+      const key = makeSceneKey(name);
+      scenes[key] = { name: name.trim().slice(0, 24), tint: nextTint(), answers: [] };
+      managerSceneKey = key;
+      refreshSceneSelect();
+      switchScene(key);
+      managerBackdrop.hidden = false;
+      renderManager();
+    }
+
+    function renameScene() {
+      const scene = scenes[managerSceneKey];
+      if (!scene) return;
+      const nextName = sceneNameInput.value.trim().slice(0, 24);
+      if (!nextName) return;
+      scene.name = nextName;
+      refreshSceneSelect();
+      renderManager();
+      if (managerSceneKey === state.activeScene) {
+        state.status = nextName;
+        statusEl.textContent = nextName;
+      }
+    }
+
+    function deleteScene() {
+      if (Object.keys(scenes).length <= 1) {
+        state.status = "至少保留一个场景";
+        statusEl.textContent = state.status;
+        return;
+      }
+      const scene = scenes[managerSceneKey];
+      if (!scene || !window.confirm(`删除“${scene.name}”？`)) return;
+      delete scenes[managerSceneKey];
+      managerSceneKey = firstSceneKey();
+      refreshSceneSelect();
+      switchScene(managerSceneKey);
+      managerBackdrop.hidden = false;
+      renderManager();
+    }
+
+    function addAnswer() {
+      const scene = scenes[managerSceneKey];
+      const value = newAnswerInput.value.trim();
+      if (!scene || !value) return;
+      scene.answers.push(value);
+      newAnswerInput.value = "";
+      renderManager();
+    }
+
+    function restoreDefaults() {
+      if (!window.confirm("恢复默认答案？当前未保存或已保存的自定义内容都会被替换。")) return;
+      scenes = cloneScenes(defaultScenes);
+      state.activeScene = "general";
+      managerSceneKey = "general";
+      localStorage.removeItem(STORAGE_KEY);
+      resetInteractionState();
+      createBalls({ animate: true });
+      refreshSceneSelect();
+      renderManager();
+      state.status = scenes.general.name;
+      statusEl.textContent = state.status;
+    }
+
+    function setupSceneManager() {
+      manageButton.addEventListener("click", openManager);
+      closeManagerButton.addEventListener("click", closeManager);
+      managerBackdrop.addEventListener("click", (event) => {
+        if (event.target === managerBackdrop) closeManager();
+      });
+      managerSceneSelect.addEventListener("change", () => {
+        managerSceneKey = managerSceneSelect.value;
+        switchScene(managerSceneKey);
+        managerBackdrop.hidden = false;
+        renderManager();
+      });
+      renameSceneButton.addEventListener("click", renameScene);
+      sceneNameInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") renameScene();
+      });
+      addSceneButton.addEventListener("click", addScene);
+      deleteSceneButton.addEventListener("click", deleteScene);
+      addAnswerButton.addEventListener("click", addAnswer);
+      newAnswerInput.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") addAnswer();
+      });
+      answerList.addEventListener("input", (event) => {
+        if (!event.target.classList.contains("answer-input")) return;
+        const scene = scenes[managerSceneKey];
+        const index = Number(event.target.dataset.index);
+        if (!scene || !Number.isInteger(index)) return;
+        scene.answers[index] = event.target.value;
+      });
+      answerList.addEventListener("click", (event) => {
+        if (!event.target.classList.contains("answer-delete")) return;
+        const scene = scenes[managerSceneKey];
+        const index = Number(event.target.dataset.index);
+        if (!scene || !Number.isInteger(index)) return;
+        scene.answers.splice(index, 1);
+        renderManager();
+      });
+      saveScenesButton.addEventListener("click", () => {
+        renameScene();
+        saveScenes();
+        refreshSceneSelect();
+        renderManager();
+      });
+      restoreDefaultButton.addEventListener("click", restoreDefaults);
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !managerBackdrop.hidden) closeManager();
+      });
+    }
+
+    function updateCameraCard() {
+      modeStatus.textContent = state.modelReady ? "手势模式已开启" : "点击模式";
+      cameraStatus.textContent = state.cameraReady ? "摄像头识别中" : "摄像头未开启";
+    }
+
+    function setupCameraCard() {
+      updateCameraCard();
+      cameraToggle.addEventListener("click", () => {
+        const expanded = !cameraCard.classList.contains("is-expanded");
+        cameraCard.classList.toggle("is-expanded", expanded);
+        cameraToggle.textContent = expanded ? "隐藏预览" : "预览选择";
+      });
+    }
+
+    function updateFullscreenButton() {
+      fullscreenButton.textContent = document.fullscreenElement ? "退出全屏" : "全屏";
+    }
+
+    function setupFullscreen() {
+      updateFullscreenButton();
+      fullscreenButton.addEventListener("click", async () => {
+        try {
+          if (document.fullscreenElement) {
+            await document.exitFullscreen();
+          } else {
+            await document.documentElement.requestFullscreen();
+          }
+        } catch (error) {
+          state.status = "当前浏览器无法切换全屏";
+          statusEl.textContent = state.status;
+        }
+      });
+      document.addEventListener("fullscreenchange", updateFullscreenButton);
+    }
+
+    function renderShareCard(record) {
+      shareScene.textContent = record.sceneName;
+      shareDateTime.textContent = `${record.date} ${record.time}`;
+      shareAnswer.textContent = record.answer;
+      shareSource.textContent = `来源：${record.source}`;
+    }
+
+    function openShareModal() {
+      if (!state.currentDrawRecord) return;
+      renderShareCard(state.currentDrawRecord);
+      shareBackdrop.hidden = false;
+    }
+
+    function closeShareModal() {
+      shareBackdrop.hidden = true;
+    }
+
+    function shareFileName(record) {
+      const safeScene = record.sceneName.replace(/[\\/:*?"<>|\s]+/g, "-").slice(0, 24);
+      const safeTime = `${record.date}-${record.time}`.replace(/[\\/:*?"<>|\s]+/g, "-");
+      return `一纸决定-${safeScene}-${safeTime}.png`;
+    }
+
+    async function exportShareCardBlob() {
+      if (!window.html2canvas) throw new Error("html2canvas 未加载");
+      const canvas = await window.html2canvas(shareCard, {
+        backgroundColor: null,
+        scale: Math.max(2, window.devicePixelRatio || 1),
+        useCORS: true
+      });
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error("图片生成失败"));
+        }, "image/png");
+      });
+    }
+
+    async function saveShareImage() {
+      try {
+        const record = state.currentDrawRecord;
+        const blob = await exportShareCardBlob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = shareFileName(record);
+        link.click();
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        state.status = "分享卡片生成失败";
+        statusEl.textContent = state.status;
+      }
+    }
+
+    async function systemShareImage() {
+      try {
+        const record = state.currentDrawRecord;
+        const blob = await exportShareCardBlob();
+        const file = new File([blob], shareFileName(record), { type: "image/png" });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({
+            title: "一纸决定",
+            text: `${record.sceneName}：${record.answer}`,
+            files: [file]
+          });
+        } else if (navigator.share) {
+          await navigator.share({
+            title: "一纸决定",
+            text: `${record.sceneName}｜${record.date} ${record.time}\\n${record.answer}`
+          });
+        } else {
+          state.status = "当前浏览器不支持系统分享";
+          statusEl.textContent = state.status;
+        }
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          state.status = "系统分享未完成";
+          statusEl.textContent = state.status;
+        }
+      }
+    }
+
+    function setupShareActions() {
+      redrawButton.addEventListener("click", redrawCurrentScene);
+      shareCardButton.addEventListener("click", openShareModal);
+      closeShareButton.addEventListener("click", closeShareModal);
+      saveShareButton.addEventListener("click", saveShareImage);
+      systemShareButton.addEventListener("click", systemShareImage);
+      shareBackdrop.addEventListener("click", (event) => {
+        if (event.target === shareBackdrop) closeShareModal();
+      });
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !shareBackdrop.hidden) closeShareModal();
+      });
+    }
+
+    function mapLandmark(point) {
+      return {
+        x: (1 - point.x) * state.width,
+        y: point.y * state.height,
+        z: point.z || 0
+      };
+    }
+
+    function isFingerExtended(landmarks, tip, pip) {
+      return landmarks[tip].y < landmarks[pip].y - 0.018;
+    }
+
+    function analyzeHand(landmarks) {
+      const pts = landmarks.map(mapLandmark);
+      const thumbIndex = normDist(landmarks, 4, 8);
+      const thumbMiddle = normDist(landmarks, 4, 12);
+      const indexMiddle = normDist(landmarks, 8, 12);
+      const pinchScore = (thumbIndex + thumbMiddle + indexMiddle) / 3;
+      const pinchGap = Math.max(thumbIndex, thumbMiddle, indexMiddle);
+      const fingers = [
+        isFingerExtended(landmarks, 8, 6),
+        isFingerExtended(landmarks, 12, 10),
+        isFingerExtended(landmarks, 16, 14),
+        isFingerExtended(landmarks, 20, 18)
+      ];
+      const extendedCount = fingers.filter(Boolean).length;
+      const palm = pts[0];
+      const index = pts[8];
+      const middle = pts[12];
+      const thumb = pts[4];
+      const centroid = {
+        x: (thumb.x + index.x + middle.x) / 3,
+        y: (thumb.y + index.y + middle.y) / 3
+      };
+      return {
+        pts,
+        palm,
+        index,
+        middle,
+        thumb,
+        centroid,
+        pinch: pinchScore < 0.072 && pinchGap < 0.108,
+        pinchRelaxed: pinchScore < 0.12 && pinchGap < 0.165,
+        pinchScore,
+        pinchGap,
+        openPalm: extendedCount >= 4 && pinchScore > 0.14,
+        extendedCount
+      };
+    }
+
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: "user"
+          },
+          audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        state.cameraReady = true;
+        updateCameraCard();
+        permission.classList.remove("is-visible");
+        statusEl.textContent = "正在加载手势模型...";
+        await startHandModel();
+      } catch (error) {
+        permission.classList.add("is-visible");
+        state.status = "鼠标预览模式";
+        state.cameraReady = false;
+        state.modelReady = false;
+        updateCameraCard();
+        statusEl.textContent = "鼠标预览模式";
+      }
+    }
+
+    async function startHandModel() {
+      try {
+        const vision = await FilesetResolver.forVisionTasks(
+          "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+        );
+        const createLandmarker = (delegate) => HandLandmarker.createFromOptions(vision, {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+            delegate
+          },
+          runningMode: "VIDEO",
+          numHands: 2,
+          minHandDetectionConfidence: 0.55,
+          minHandPresenceConfidence: 0.55,
+          minTrackingConfidence: 0.55
+        });
+        let handLandmarker;
+        try {
+          handLandmarker = await createLandmarker("GPU");
+        } catch (gpuError) {
+          handLandmarker = await createLandmarker("CPU");
+        }
+        state.modelReady = true;
+        updateCameraCard();
+        state.status = "等待手势";
+        statusEl.textContent = state.status;
+        detectHands(handLandmarker);
+      } catch (error) {
+        permission.classList.add("is-visible");
+        state.status = "模型加载失败";
+        state.modelReady = false;
+        updateCameraCard();
+        statusEl.textContent = "模型加载失败";
+      }
+    }
+
+    let lastVideoTime = -1;
+    function detectHands(handLandmarker) {
+      if (video.currentTime !== lastVideoTime && state.cameraReady) {
+        lastVideoTime = video.currentTime;
+        const result = handLandmarker.detectForVideo(video, performance.now());
+        state.previousHands = state.hands;
+        state.previousHand = state.hand;
+        state.hands = result.landmarks?.length ? result.landmarks.map(analyzeHand) : [];
+        state.hand = state.hands[0] || null;
+      }
+      requestAnimationFrame(() => detectHands(handLandmarker));
+    }
+
+    function currentPointer() {
+      if (state.hand) {
+        const crossed = areHandsCrossed();
+        return {
+          active: true,
+          index: state.hand.index,
+          pinchPoint: state.hand.centroid,
+          palm: state.hand.palm,
+          pinch: crossed ? false : state.hand.pinch,
+          pinchRelaxed: crossed ? false : state.hand.pinchRelaxed,
+          openPalm: crossed ? false : state.hand.openPalm,
+          label: crossed ? "双手交叉" : state.hand.pinch ? "三指捏合" : state.hand.openPalm ? "张开后挥散" : "选择"
+        };
+      }
+
+      if (state.mouse.active) {
+        return {
+          active: true,
+          index: { x: state.mouse.x, y: state.mouse.y },
+          pinchPoint: { x: state.mouse.x, y: state.mouse.y },
+          palm: { x: state.mouse.x, y: state.mouse.y },
+          pinch: state.mouse.down,
+          pinchRelaxed: state.mouse.down,
+          openPalm: false,
+          label: state.mouse.down ? "预览捏合" : "预览选择"
+        };
+      }
+
+      return { active: false, label: state.status };
+    }
+
+    function handSpan(hand) {
+      return Math.max(52, dist(hand.pts[0], hand.pts[9]) * 2.4);
+    }
+
+    function areHandsCrossed() {
+      if (state.hands.length < 2) return false;
+      const [a, b] = state.hands;
+      const scale = Math.max(handSpan(a), handSpan(b));
+      const palmDistance = dist(a.palm, b.palm);
+      const tipsToOtherPalm = (
+        dist(a.pts[8], b.palm) +
+        dist(a.pts[12], b.palm) +
+        dist(a.pts[16], b.palm) +
+        dist(b.pts[8], a.palm) +
+        dist(b.pts[12], a.palm) +
+        dist(b.pts[16], a.palm)
+      ) / 6;
+      const thumbCross = Math.min(dist(a.thumb, b.index), dist(b.thumb, a.index));
+      const indexCross = Math.min(dist(a.index, b.palm), dist(b.index, a.palm));
+      return palmDistance < scale * 1.12 && tipsToOtherPalm < scale * 1.18 && (thumbCross < scale * 1.28 || indexCross < scale * 0.92);
+    }
+
+    function startTrashSequence(ball) {
+      if (!ball || state.trash) return;
+      const bin = trashBinTarget();
+      state.trash = {
+        ball,
+        progress: 0,
+        startX: ball.x,
+        startY: ball.y,
+        startAngle: ball.angle,
+        targetX: bin.x,
+        targetY: bin.y - bin.h * 0.28
+      };
+      ball.trashing = true;
+      ball.settled = false;
+      ball.settleFrames = 0;
+      ball.air = 0;
+      ball.airVelocity = 0;
+      state.opened = null;
+      state.grabbed = null;
+      state.selected = null;
+      state.actionHover = null;
+      state.actionHoverSince = 0;
+      redrawButton.classList.remove("is-gesture-hover");
+      shareCardButton.classList.remove("is-gesture-hover");
+      answerActions.hidden = true;
+      state.centerConfirmProgress = 0;
+      state.trashShake = 1;
+      state.trashCooldownUntil = performance.now() + 1100;
+    }
+
+    function trashBinTarget() {
+      const size = clamp(Math.min(state.width, state.height) * 0.15, 86, 128);
+      return {
+        x: state.width - size * 0.72,
+        y: state.height - size * 0.52,
+        w: size * 0.78,
+        h: size
+      };
+    }
+
+    function centerConfirmZone() {
+      const size = Math.min(state.width, state.height);
+      return {
+        x: state.width * 0.5,
+        y: state.height * 0.48,
+        r: clamp(size * 0.135, 86, 138)
+      };
+    }
+
+    function isInCenterConfirmZone(ball) {
+      if (!ball) return false;
+      const zone = centerConfirmZone();
+      return Math.hypot(ball.x - zone.x, ball.y - zone.y) < zone.r * 0.62;
+    }
+
+    function openBall(ball) {
+      if (!ball || ball.hidden || ball.trashing) return;
+      ball.note = randomSceneAnswer();
+      ball.open = Math.max(ball.open, 0.16);
+      state.opened = ball;
+      state.grabbed = ball;
+      state.centerConfirmProgress = 1;
+      state.currentDrawRecord = createDrawRecord(ball.note);
+      saveDrawHistory(state.currentDrawRecord);
+      answerActions.hidden = false;
+    }
+
+    function createDrawRecord(answer) {
+      const now = new Date();
+      const date = now.toLocaleDateString("zh-CN", { year: "numeric", month: "2-digit", day: "2-digit" });
+      const time = now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+      return {
+        id: `draw-${now.getTime()}-${Math.random().toString(16).slice(2, 8)}`,
+        date,
+        time,
+        sceneName: currentScene().name,
+        answer,
+        source: "一纸决定"
+      };
+    }
+
+    function saveDrawHistory(record) {
+      try {
+        const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+        history.unshift(record);
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(0, 20)));
+      } catch (error) {
+        localStorage.removeItem(HISTORY_KEY);
+      }
+    }
+
+    function redrawCurrentScene() {
+      resetInteractionState();
+      answerActions.hidden = true;
+      redrawButton.classList.remove("is-gesture-hover");
+      shareCardButton.classList.remove("is-gesture-hover");
+      shareBackdrop.hidden = true;
+      createBalls({ animate: true });
+    }
+
+    function answerActionAt(point) {
+      if (!point || answerActions.hidden || !state.opened || state.trash) return null;
+      const buttons = [redrawButton, shareCardButton];
+      const pad = 34;
+      return buttons.find((button) => {
+        const rect = button.getBoundingClientRect();
+        return (
+          point.x >= rect.left - pad &&
+          point.x <= rect.right + pad &&
+          point.y >= rect.top - pad &&
+          point.y <= rect.bottom + pad
+        );
+      }) || null;
+    }
+
+    function updateAnswerActionGesture(pointer) {
+      const canUseActions =
+        pointer.active &&
+        state.opened &&
+        !state.trash &&
+        managerBackdrop.hidden &&
+        shareBackdrop.hidden;
+
+      if (!canUseActions) {
+        state.actionHover = null;
+        state.actionHoverSince = 0;
+        redrawButton.classList.remove("is-gesture-hover");
+        shareCardButton.classList.remove("is-gesture-hover");
+        return;
+      }
+
+      const button =
+        answerActionAt(pointer.pinchPoint) ||
+        answerActionAt(pointer.index);
+      const now = performance.now();
+      if (button !== state.actionHover) {
+        state.actionHover = button;
+        state.actionHoverSince = button ? now : 0;
+      }
+      const hoverDuration = button ? now - state.actionHoverSince : 0;
+      const holdingActionPinch = Boolean(pointer.pinch || pointer.pinchRelaxed);
+      state.actionHover = button;
+      redrawButton.classList.toggle("is-gesture-hover", button === redrawButton);
+      shareCardButton.classList.toggle("is-gesture-hover", button === shareCardButton);
+
+      const canTriggerAgain = now - state.actionLastTriggeredAt > 900;
+      const pinchConfirmed = holdingActionPinch && hoverDuration >= 200;
+      const hoverConfirmed = hoverDuration >= 600;
+      if (button && canTriggerAgain && (pinchConfirmed || hoverConfirmed)) {
+        state.actionLastTriggeredAt = now;
+        button.click();
+        state.actionHover = null;
+        state.actionHoverSince = 0;
+        redrawButton.classList.remove("is-gesture-hover");
+        shareCardButton.classList.remove("is-gesture-hover");
+      }
+    }
+
+    function selectBall(pointer) {
+      if (!pointer.active || state.opened) return null;
+      if (state.selected && !state.selected.hidden && !state.selected.trashing && state.selected.open <= 0.02) {
+        const currentDistance = Math.hypot(state.selected.x - pointer.index.x, state.selected.y - pointer.index.y);
+        const stickyReach = state.selected.r + Math.min(state.width, state.height) * 0.095;
+        if (currentDistance < stickyReach) return state.selected;
+      }
+      let nearest = null;
+      let nearestDistance = Infinity;
+      for (const ball of state.balls) {
+        if (ball.hidden || ball.trashing) continue;
+        if (ball.open > 0.02) continue;
+        const indexDistance = Math.hypot(ball.x - pointer.index.x, ball.y - pointer.index.y);
+        const pinchDistance = pointer.pinchPoint ? Math.hypot(ball.x - pointer.pinchPoint.x, ball.y - pointer.pinchPoint.y) : indexDistance;
+        const d = Math.min(indexDistance, pinchDistance);
+        const reach = ball.r + Math.min(state.width, state.height) * (pointer.pinch ? 0.12 : 0.075);
+        if (d < reach && d < nearestDistance) {
+          nearest = ball;
+          nearestDistance = d;
+        }
+      }
+      return nearest;
+    }
+
+    function applyOpenPalmForce(pointer, dt) {
+      if (!pointer.active || !pointer.openPalm) return;
+      const now = performance.now();
+      if (now > state.openPalmBlastUntil) return;
+      const strength = now - state.lastBlastAt > 90 ? 1 : 0.35;
+      state.lastBlastAt = now;
+      for (const ball of state.balls) {
+        if (ball.open > 0.02) continue;
+        const dx = ball.x - pointer.index.x;
+        const dy = ball.y - pointer.index.y;
+        const d = Math.max(24, Math.hypot(dx, dy));
+        const radius = Math.min(state.width, state.height) * 0.38;
+        if (d < radius) {
+          const falloff = (1 - d / radius) ** 1.9;
+          const force = falloff * strength * dt * 0.34;
+          ball.settled = false;
+          ball.settleFrames = 0;
+          ball.vx += (dx / d) * force + (Math.random() - 0.5) * 0.08;
+          ball.vy += (dy / d) * force + (Math.random() - 0.5) * 0.08;
+          ball.spin += (Math.random() - 0.5) * 0.004;
+        }
+      }
+    }
+
+    function detectOpenPalmWave(pointer, dt, now, gestureLocked) {
+      const cooldown = 2400;
+      const canTrack =
+        !gestureLocked &&
+        pointer.active &&
+        pointer.openPalm &&
+        !pointer.pinch &&
+        !state.grabbed &&
+        !state.opened &&
+        !state.actionHover;
+
+      if (!canTrack) {
+        state.openPalmSince = 0;
+        state.openPalmLastPoint = null;
+        return false;
+      }
+
+      const point = pointer.palm || pointer.index;
+      if (!state.openPalmSince || !state.openPalmLastPoint) {
+        state.openPalmSince = now;
+        state.openPalmLastPoint = { x: point.x, y: point.y };
+        return false;
+      }
+
+      const dx = point.x - state.openPalmLastPoint.x;
+      const dy = point.y - state.openPalmLastPoint.y;
+      const move = Math.hypot(dx, dy);
+      const speed = move / Math.max(dt, 16) * 1000;
+      const held = now - state.openPalmSince;
+      state.openPalmLastPoint = { x: point.x, y: point.y };
+
+      const outX = point.x - state.width * 0.5;
+      const outY = point.y - state.height * 0.48;
+      const outDistance = Math.max(1, Math.hypot(outX, outY));
+      const directionScore = move > 0 ? (dx * outX + dy * outY) / (move * outDistance) : 0;
+      const outwardSwipe = directionScore > 0.22 && move > 16;
+      const pushSwipe = dy > 22 && speed > 560;
+      const decisiveSwipe = move > 38 && speed > 760;
+
+      return (
+        held >= 320 &&
+        now - state.lastThrowAt >= cooldown &&
+        speed >= 680 &&
+        (outwardSwipe || pushSwipe || decisiveSwipe)
+      );
+    }
+
+    function scatterTargetFor(index, total, origin) {
+      const angle = index * 2.399963 + Math.sin(index * 17.1) * 0.28;
+      const ring = Math.sqrt((index + 0.8) / total);
+      const rx = state.width * 0.42;
+      const ry = state.height * 0.33;
+      return {
+        x: clamp(origin.x + Math.cos(angle) * ring * rx + (Math.random() - 0.5) * 80, 70, state.width - 70),
+        y: clamp(origin.y + Math.sin(angle) * ring * ry + (Math.random() - 0.5) * 66, 96, state.height - 68)
+      };
+    }
+
+    function throwPaperBalls(pointer) {
+      if (state.opened) return;
+      const now = performance.now();
+      if (now - state.lastThrowAt < 2400) return;
+      state.lastThrowAt = now;
+      state.grabbed = null;
+      const origin = pointer.index || { x: state.width * 0.5, y: state.height * 0.46 };
+      state.balls.forEach((ball, index) => {
+        if (ball.hidden || ball.trashing || ball.open > 0.02) return;
+        const target = scatterTargetFor(index, state.balls.length, origin);
+        const startX = clamp(origin.x + (Math.random() - 0.5) * 150, ball.r + 20, state.width - ball.r - 20);
+        const startY = clamp(origin.y - 16 + (Math.random() - 0.5) * 110, ball.r + 74, state.height - ball.r - 24);
+        ball.x = lerp(ball.x, startX, 0.72);
+        ball.y = lerp(ball.y, startY, 0.72);
+        ball.baseX = target.x;
+        ball.baseY = target.y;
+        const dx = target.x - ball.x;
+        const dy = target.y - ball.y;
+        const d = Math.max(1, Math.hypot(dx, dy));
+        ball.vx += (dx / d) * (8.0 + Math.random() * 5.0) + (Math.random() - 0.5) * 3.2;
+        ball.vy += (dy / d) * (7.0 + Math.random() * 4.4) + (Math.random() - 0.5) * 2.8;
+        ball.spin += (Math.random() - 0.5) * 0.22;
+        ball.lift = 0;
+        ball.air = Math.max(ball.air, 105 + Math.random() * 135);
+        ball.airVelocity = -0.115 - Math.random() * 0.085;
+        ball.settled = false;
+        ball.settleFrames = 0;
+      });
+    }
+
+    function update(dt) {
+      const now = performance.now();
+      const pointer = currentPointer();
+      updateAnswerActionGesture(pointer);
+      const crossed = areHandsCrossed();
+      if (crossed && state.opened) startTrashSequence(state.opened);
+      state.wasClasped = crossed;
+
+      if (state.trash) {
+        const item = state.trash;
+        const ball = item.ball;
+        item.progress = Math.min(1, item.progress + dt * 0.0015);
+        const p = item.progress;
+        const close = clamp(p / 0.24, 0, 1);
+        const fly = clamp((p - 0.16) / 0.84, 0, 1);
+        if (fly > 0.78) state.trashShake = Math.max(state.trashShake, (fly - 0.78) / 0.22);
+        const arc = Math.sin(fly * Math.PI);
+        ball.open = 1 - close;
+        ball.x = lerp(item.startX, item.targetX, 1 - (1 - fly) ** 3);
+        ball.y = lerp(item.startY, item.targetY, fly) - arc * 120;
+        ball.angle = item.startAngle + fly * Math.PI * 2.2;
+        ball.lift = lerp(ball.lift, 0.18, 0.18);
+        ball.air = 0;
+        ball.vx = 0;
+        ball.vy = 0;
+        ball.spin = 0;
+        ball.trashScale = lerp(1, 0.36, fly);
+        if (p >= 1) {
+          ball.open = 0;
+          ball.hidden = true;
+          ball.trashing = false;
+          state.trash = null;
+          state.trashShake = 0.8;
+          state.selected = null;
+          state.grabbed = null;
+          state.opened = null;
+          state.trashCooldownUntil = now + 900;
+        }
+      }
+
+      const gestureLocked = state.trash || crossed || Boolean(state.opened) || now < state.trashCooldownUntil;
+
+      const openPalmWave = detectOpenPalmWave(pointer, dt, now, gestureLocked);
+      if (openPalmWave) {
+        state.openPalmBlastUntil = now + 420;
+        state.openPalmSince = 0;
+        state.openPalmLastPoint = null;
+        throwPaperBalls(pointer);
+      }
+      state.wasOpenPalm = pointer.active && pointer.openPalm;
+
+      state.selected = gestureLocked ? null : (state.grabbed || selectBall(pointer));
+      if (!gestureLocked) applyOpenPalmForce(pointer, dt);
+
+      for (const ball of state.balls) {
+        ball.highlight = lerp(ball.highlight, ball === state.selected ? 1 : 0, 0.18);
+        if (!state.opened && ball === state.selected && ball !== state.grabbed) {
+          ball.lift = lerp(ball.lift, 0.46, 0.13);
+        }
+      }
+
+      if (!gestureLocked && state.selected && pointer.active && !pointer.pinch && !pointer.openPalm && !state.opened) {
+        state.selected.vx *= 0.82;
+        state.selected.vy *= 0.82;
+        state.selected.spin *= 0.84;
+      }
+
+      if (!gestureLocked && pointer.active && pointer.pinch && state.selected && !state.grabbed && !state.opened) {
+        state.grabbed = state.selected;
+        state.pinchStartedAt = performance.now();
+        state.centerConfirmProgress = 0;
+        state.grabbed.open = 0;
+      }
+
+      if (state.grabbed && !state.opened) {
+        const ball = state.grabbed;
+        const holdingPinch = pointer.active && (pointer.pinch || pointer.pinchRelaxed);
+        if (holdingPinch) {
+          const targetX = pointer.pinchPoint.x;
+          const targetY = Math.min(pointer.pinchPoint.y - 34, state.height * 0.58);
+          ball.x = lerp(ball.x, targetX, pointer.pinch ? 0.34 : 0.24);
+          ball.y = lerp(ball.y, targetY, pointer.pinch ? 0.34 : 0.24);
+          ball.vx *= 0.18;
+          ball.vy *= 0.18;
+          ball.lift = lerp(ball.lift, pointer.pinch ? 1.16 : 0.94, 0.18);
+          ball.air = lerp(ball.air, 0, 0.3);
+          ball.airVelocity = 0;
+          ball.settled = false;
+          ball.settleFrames = 0;
+          if (pointer.pinch && isInCenterConfirmZone(ball)) {
+            const zone = centerConfirmZone();
+            state.centerConfirmProgress = Math.min(1, state.centerConfirmProgress + dt * 0.004);
+            ball.x = lerp(ball.x, zone.x, 0.08);
+            ball.y = lerp(ball.y, zone.y, 0.08);
+            if (state.centerConfirmProgress >= 1) {
+              openBall(ball);
+            }
+          } else {
+            state.centerConfirmProgress = Math.max(0, state.centerConfirmProgress - dt * 0.003);
+          }
+        } else {
+          if (isInCenterConfirmZone(ball) && state.centerConfirmProgress > 0.72) {
+            openBall(ball);
+          } else {
+            ball.lift = lerp(ball.lift, 0, 0.12);
+            state.grabbed = null;
+            state.centerConfirmProgress = 0;
+          }
+        }
+      }
+
+      if (state.opened) {
+        const ball = state.opened;
+        ball.open = Math.min(1, ball.open + dt * 0.0012);
+        ball.lift = lerp(ball.lift, 1, 0.1);
+      }
+      state.trashShake = Math.max(0, state.trashShake - dt * 0.0028);
+
+      for (const ball of state.balls) {
+        if (ball.hidden || ball.trashing || ball === state.grabbed || ball.open > 0.02) continue;
+        if (ball.settled && ball.air === 0 && !pointer.openPalm) {
+          ball.highlight = lerp(ball.highlight, ball === state.selected ? 1 : 0, 0.18);
+          continue;
+        }
+        const home = ball.air > 0 ? 0 : state.selected === ball ? 0.00025 : 0.00045;
+        ball.vx += (ball.baseX - ball.x) * home * dt;
+        ball.vy += (ball.baseY - ball.y) * home * dt;
+        ball.x += ball.vx * dt * 0.04;
+        ball.y += ball.vy * dt * 0.04;
+        ball.angle += ball.spin * dt * 0.04;
+        if (ball.air > 0 || Math.abs(ball.airVelocity) > 0.0001) {
+          ball.air += ball.airVelocity * dt;
+          ball.airVelocity -= 0.00072 * dt;
+          if (ball.air <= 0) {
+            ball.air = 0;
+            if (Math.abs(ball.airVelocity) > 0.14) {
+              ball.airVelocity = -ball.airVelocity * 0.10;
+              ball.vx *= 0.62;
+              ball.vy *= 0.62;
+              ball.spin += (Math.random() - 0.5) * 0.025;
+            } else {
+              ball.airVelocity = 0;
+            }
+          }
+        }
+        ball.lift = lerp(ball.lift, 0, 0.045);
+        const friction = ball.air > 0 ? 0.986 : 0.90;
+        ball.vx *= friction;
+        ball.vy *= friction;
+        ball.spin *= ball.air > 0 ? 0.96 : 0.88;
+
+        const minX = ball.r + 14;
+        const maxX = state.width - ball.r - 14;
+        const minY = ball.r + 62;
+        const maxY = state.height - ball.r - 14;
+        if (ball.x < minX || ball.x > maxX) {
+          ball.x = clamp(ball.x, minX, maxX);
+          ball.vx *= -0.38;
+          ball.spin += ball.vy * 0.003;
+        }
+        if (ball.y < minY || ball.y > maxY) {
+          ball.y = clamp(ball.y, minY, maxY);
+          ball.vy *= -0.38;
+          ball.spin += ball.vx * 0.003;
+        }
+
+        const isOnTable = ball.air === 0 && Math.abs(ball.airVelocity) < 0.0001;
+        const speed = Math.hypot(ball.vx, ball.vy);
+        const closeToHome = Math.hypot(ball.baseX - ball.x, ball.baseY - ball.y) < 9;
+        if (isOnTable && speed < 0.045 && Math.abs(ball.spin) < 0.0035 && closeToHome) {
+          ball.settleFrames += 1;
+          if (ball.settleFrames > 10) {
+            ball.vx = 0;
+            ball.vy = 0;
+            ball.spin = 0;
+            ball.lift = 0;
+            ball.baseX = ball.x;
+            ball.baseY = ball.y;
+            ball.settled = true;
+          }
+        } else {
+          ball.settleFrames = 0;
+        }
+      }
+
+      const nextStatus = pointer.active ? pointer.label : state.status;
+      if (statusEl.textContent !== nextStatus) statusEl.textContent = nextStatus;
+    }
+
+    function drawBackground(time) {
+      const w = state.width;
+      const h = state.height;
+      if (textures.wood.complete && textures.wood.naturalWidth) {
+        const img = textures.wood;
+        const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+        const dw = img.naturalWidth * scale;
+        const dh = img.naturalHeight * scale;
+        const dx = (w - dw) / 2;
+        const dy = (h - dh) / 2;
+        ctx.drawImage(img, dx, dy, dw, dh);
+      } else {
+        const gradient = ctx.createLinearGradient(0, 0, w, h);
+        gradient.addColorStop(0, "#a87542");
+        gradient.addColorStop(0.45, "#85582e");
+        gradient.addColorStop(1, "#4c2f1d");
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, w, h);
+      }
+
+      ctx.save();
+      ctx.globalCompositeOperation = "screen";
+      ctx.globalAlpha = 0.12;
+      const light = ctx.createRadialGradient(w * 0.18, h * 0.08, 0, w * 0.18, h * 0.08, Math.max(w, h) * 0.72);
+      light.addColorStop(0, "rgba(255, 220, 160, 0.85)");
+      light.addColorStop(0.36, "rgba(255, 190, 105, 0.24)");
+      light.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = light;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = 0.18;
+      const vignette = ctx.createRadialGradient(w * 0.5, h * 0.42, h * 0.18, w * 0.5, h * 0.5, h * 0.86);
+      vignette.addColorStop(0, "rgba(255,255,255,0.05)");
+      vignette.addColorStop(1, "rgba(0,0,0,0.92)");
+      ctx.fillStyle = vignette;
+      ctx.fillRect(0, 0, w, h);
+      ctx.restore();
+    }
+
+    function paperPath(radius, folds, open) {
+      const points = [];
+      const count = folds || 18;
+      for (let i = 0; i < count; i++) {
+        const t = (i / count) * Math.PI * 2;
+        const wrinkle = Math.sin(t * 3.1) * 0.07 + Math.cos(t * 5.3) * 0.055;
+        const r = radius * (1 + wrinkle * (1 - open * 0.8));
+        points.push({ x: Math.cos(t) * r, y: Math.sin(t) * r });
+      }
+      return points;
+    }
+
+    function traceIrregularBall(radius, seed, open = 0) {
+      const count = 34;
+      const wobble = 1 - open * 0.55;
+      ctx.beginPath();
+      for (let i = 0; i <= count; i++) {
+        const t = (i / count) * Math.PI * 2;
+        const wrinkle =
+          Math.sin(t * 3.7 + seed) * 0.055 +
+          Math.cos(t * 7.1 + seed * 0.37) * 0.035 +
+          Math.sin(t * 11.0 + seed * 0.2) * 0.022;
+        const r = radius * (1 + wrinkle * wobble);
+        const x = Math.cos(t) * r;
+        const y = Math.sin(t) * r * (0.96 + Math.sin(seed) * 0.035);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    }
+
+    function drawBallTexture(ball, radius) {
+      if (!textures.ball.complete || !textures.ball.naturalWidth) return false;
+      const img = textures.ball;
+      const side = Math.min(img.naturalWidth, img.naturalHeight) * (0.66 / ball.textureZoom);
+      const sx = img.naturalWidth * (0.5 + ball.textureX) - side / 2;
+      const sy = img.naturalHeight * (0.52 + ball.textureY) - side / 2;
+      const size = radius * 2.62;
+      ctx.drawImage(img, sx, sy, side, side, -size / 2, -size / 2, size, size);
+      return true;
+    }
+
+    function drawCrumpledBall(ball) {
+      const r = ball.r;
+      const air = ball.air || 0;
+      const selectedScale = 1 + ball.highlight * 0.08;
+      const scale = (ball.trashScale || 1) * selectedScale;
+      ctx.save();
+      ctx.translate(ball.x, ball.y - ball.lift * 22 - air);
+      ctx.scale(scale, scale);
+      ctx.rotate(ball.angle);
+
+      ctx.save();
+      ctx.translate(9 + ball.lift * 13 + air * 0.08, 16 + ball.lift * 22 + air);
+      ctx.scale(1.14 + air * 0.0032, 0.46 + air * 0.0012);
+      ctx.filter = `blur(${3 + air * 0.018}px)`;
+      ctx.fillStyle = `rgba(0, 0, 0, ${clamp(0.34 + ball.lift * 0.18 - air * 0.0011, 0.10, 0.38)})`;
+      ctx.beginPath();
+      ctx.arc(0, 0, r * 1.05, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.filter = "none";
+      ctx.restore();
+
+      const glow = ball.highlight;
+      if (glow > 0.02) {
+        ctx.save();
+        ctx.globalAlpha = glow * 0.40;
+        ctx.fillStyle = "#ffe4a3";
+        ctx.shadowColor = "#ffd98a";
+        ctx.shadowBlur = 26;
+        ctx.beginPath();
+        ctx.arc(0, 0, r + 15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = glow;
+        ctx.strokeStyle = "rgba(255, 225, 154, 0.94)";
+        ctx.lineWidth = 3.4;
+        ctx.shadowColor = "#ffd98a";
+        ctx.shadowBlur = 22;
+        ctx.beginPath();
+        ctx.arc(0, 0, r + 10, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      traceIrregularBall(r * 1.03, ball.seed, ball.open);
+      const shell = new Path2D();
+      const count = 34;
+      for (let i = 0; i <= count; i++) {
+        const t = (i / count) * Math.PI * 2;
+        const wrinkle =
+          Math.sin(t * 3.7 + ball.seed) * 0.055 +
+          Math.cos(t * 7.1 + ball.seed * 0.37) * 0.035 +
+          Math.sin(t * 11.0 + ball.seed * 0.2) * 0.022;
+        const rr = r * 1.03 * (1 + wrinkle);
+        const x = Math.cos(t) * rr;
+        const y = Math.sin(t) * rr * (0.96 + Math.sin(ball.seed) * 0.035);
+        if (i === 0) shell.moveTo(x, y);
+        else shell.lineTo(x, y);
+      }
+      shell.closePath();
+
+      ctx.fillStyle = "#f5f5f1";
+      ctx.fill();
+
+      ctx.save();
+      ctx.clip(shell);
+      const usedTexture = drawBallTexture(ball, r);
+      if (!usedTexture) {
+        const g = ctx.createRadialGradient(-r * 0.34, -r * 0.42, r * 0.08, 0, 0, r * 1.2);
+        g.addColorStop(0, "#ffffff");
+        g.addColorStop(0.42, "#eeeeea");
+        g.addColorStop(0.78, "#cacaca");
+        g.addColorStop(1, "#a7a7a7");
+        ctx.fillStyle = g;
+        ctx.fillRect(-r * 1.3, -r * 1.3, r * 2.6, r * 2.6);
+      }
+
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = 0.24;
+      ctx.fillStyle = ball.tint || currentScene().tint;
+      ctx.fillRect(-r * 1.4, -r * 1.4, r * 2.8, r * 2.8);
+
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = 0.16;
+      const shade = ctx.createRadialGradient(-r * 0.36, -r * 0.5, r * 0.08, r * 0.16, r * 0.22, r * 1.38);
+      shade.addColorStop(0, "#ffffff");
+      shade.addColorStop(0.46, "#d8d8d8");
+      shade.addColorStop(1, "#595959");
+      ctx.fillStyle = shade;
+      ctx.fillRect(-r * 1.4, -r * 1.4, r * 2.8, r * 2.8);
+      ctx.globalCompositeOperation = "source-over";
+
+      ctx.globalAlpha = 0.45;
+      ctx.strokeStyle = "rgba(80, 80, 80, 0.34)";
+      ctx.lineWidth = Math.max(0.7, r * 0.025);
+      for (const crease of ball.crumple) {
+        const a = crease.a + Math.sin(ball.seed + crease.d * 6) * 0.9;
+        const d = crease.d * r * 0.86;
+        const x = Math.cos(a) * d;
+        const y = Math.sin(a) * d;
+        const len = crease.len * r * 0.8;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(a + Math.PI * 0.5);
+        ctx.globalAlpha = crease.alpha * 0.65;
+        ctx.beginPath();
+        ctx.moveTo(-len * 0.5, 0);
+        ctx.quadraticCurveTo(0, Math.sin(a * 4) * r * 0.08, len * 0.5, 0);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.globalAlpha = 0.28;
+      ctx.globalCompositeOperation = "screen";
+      ctx.fillStyle = "#ffffff";
+      for (let i = 0; i < 5; i++) {
+        const a = ball.seed + i * 1.82;
+        const x = Math.cos(a) * r * (0.12 + i * 0.06);
+        const y = Math.sin(a * 1.3) * r * 0.34;
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * (0.18 + i * 0.018), r * 0.075, a * 0.7, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.globalCompositeOperation = "source-over";
+      ctx.restore();
+
+      ctx.save();
+      ctx.strokeStyle = "rgba(255,255,255,0.46)";
+      ctx.lineWidth = 1;
+      ctx.stroke(shell);
+      ctx.restore();
+
+      ctx.clip();
+      for (const crease of ball.crumple) {
+        const a = crease.a + Math.sin(ball.seed + crease.d * 6) * 0.7;
+        const d = crease.d * r;
+        const x = Math.cos(a) * d;
+        const y = Math.sin(a) * d;
+        const len = crease.len * r;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(a + Math.PI * 0.5);
+        ctx.globalAlpha = crease.alpha;
+        ctx.lineWidth = crease.w;
+        ctx.strokeStyle = Math.sin(a * 2) > 0 ? "#fffaf0" : "#6d6254";
+        ctx.beginPath();
+        ctx.moveTo(-len * 0.5, 0);
+        ctx.quadraticCurveTo(0, Math.sin(a * 4) * r * 0.08, len * 0.5, 0);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.ellipse(-r * 0.28, -r * 0.36, r * 0.23, r * 0.12, -0.55, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    function updateGestureCursor(pointer) {
+      const visible = pointer.active && !state.trash && managerBackdrop.hidden && shareBackdrop.hidden;
+      gestureCursor.classList.toggle("is-visible", visible);
+      if (!visible) {
+        gestureCursor.classList.remove("is-hover", "is-grabbing");
+        return;
+      }
+
+      const target = pointer.index || pointer.pinchPoint;
+      gestureCursor.style.setProperty("--cursor-x", `${target.x}px`);
+      gestureCursor.style.setProperty("--cursor-y", `${target.y}px`);
+      gestureCursor.classList.toggle("is-hover", Boolean((state.selected && !state.grabbed) || state.actionHover));
+      gestureCursor.classList.toggle("is-grabbing", Boolean(state.grabbed || pointer.pinch || state.actionHover));
+    }
+
+    function drawCenterConfirmZone() {
+      if (state.opened || state.trash) return;
+      const zone = centerConfirmZone();
+      const p = state.centerConfirmProgress;
+      const hasGrabbed = Boolean(state.grabbed);
+      const near = hasGrabbed && isInCenterConfirmZone(state.grabbed);
+      const strength = near ? 1 : hasGrabbed ? 0.62 : 0.22;
+      ctx.save();
+      ctx.translate(zone.x, zone.y);
+
+      const glow = ctx.createRadialGradient(0, 0, zone.r * 0.08, 0, 0, zone.r * 1.28);
+      glow.addColorStop(0, `rgba(111, 244, 224, ${0.16 + strength * 0.14})`);
+      glow.addColorStop(0.46, `rgba(111, 244, 224, ${0.07 + strength * 0.09})`);
+      glow.addColorStop(1, "rgba(111, 244, 224, 0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(0, 0, zone.r * 1.28, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 0.24 + strength * 0.38;
+      ctx.strokeStyle = near ? "rgba(94, 244, 223, 0.90)" : "rgba(158, 235, 224, 0.46)";
+      ctx.lineWidth = near ? 4 : 3;
+      ctx.shadowColor = "rgba(78, 239, 218, 0.28)";
+      ctx.shadowBlur = near ? 22 : 10;
+      ctx.beginPath();
+      ctx.arc(0, 0, zone.r, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = hasGrabbed ? 0.18 + p * 0.38 : 0.08;
+      ctx.fillStyle = "rgba(89, 230, 211, 0.20)";
+      ctx.beginPath();
+      ctx.arc(0, 0, zone.r * (0.58 + p * 0.16), 0, Math.PI * 2);
+      ctx.fill();
+
+      if (p > 0.02) {
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.88)";
+        ctx.lineWidth = 5;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.arc(0, 0, zone.r * 0.78, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * p);
+        ctx.stroke();
+      }
+
+      if (hasGrabbed) {
+        ctx.globalAlpha = near ? 0.72 : 0.44;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.72)";
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-zone.r * 0.18, zone.r * 0.02);
+        ctx.lineTo(-zone.r * 0.04, zone.r * 0.16);
+        ctx.lineTo(zone.r * 0.24, -zone.r * 0.16);
+        ctx.stroke();
+      } else {
+        const mainSize = clamp(Math.floor(zone.r * 0.14), 14, 18);
+        const subSize = clamp(Math.floor(zone.r * 0.115), 12, 15);
+        const firstRest = "捏合抓取纸团";
+        ctx.globalAlpha = 0.74;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = `650 ${mainSize}px ${FONT_UI}`;
+        const strongWidth = ctx.measureText("三指").width;
+        ctx.font = `450 ${mainSize}px ${FONT_UI}`;
+        const restWidth = ctx.measureText(firstRest).width;
+        const totalWidth = strongWidth + restWidth;
+        const startX = -totalWidth / 2;
+        ctx.textAlign = "left";
+        ctx.font = `650 ${mainSize}px ${FONT_UI}`;
+        ctx.fillStyle = "rgba(255, 226, 154, 0.94)";
+        ctx.shadowColor = "rgba(255, 205, 111, 0.24)";
+        ctx.shadowBlur = 10;
+        ctx.fillText("三指", startX, -mainSize * 0.42);
+        ctx.shadowBlur = 0;
+        ctx.font = `450 ${mainSize}px ${FONT_UI}`;
+        ctx.fillStyle = "rgba(248, 248, 240, 0.76)";
+        ctx.fillText(firstRest, startX + strongWidth, -mainSize * 0.42);
+        ctx.textAlign = "center";
+        ctx.globalAlpha = 0.52;
+        ctx.font = `400 ${subSize}px ${FONT_UI}`;
+        ctx.fillStyle = "rgba(248, 248, 240, 0.66)";
+        ctx.fillText("拖到这里打开", 0, mainSize * 0.95);
+      }
+      ctx.restore();
+    }
+
+    function traceSheetPath(w, h, seed, fold) {
+      const edge = 12 + fold * 0.2;
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + edge * 0.3, -h / 2 + Math.sin(seed) * edge);
+      for (let i = 1; i <= 8; i++) {
+        const x = -w / 2 + (w * i) / 8;
+        const y = -h / 2 + Math.sin(seed + i * 1.4) * edge;
+        ctx.lineTo(x, y);
+      }
+      for (let i = 1; i <= 5; i++) {
+        const x = w / 2 + Math.sin(seed + i) * edge * 0.5;
+        const y = -h / 2 + (h * i) / 5;
+        ctx.lineTo(x, y);
+      }
+      for (let i = 8; i >= 0; i--) {
+        const x = -w / 2 + (w * i) / 8;
+        const y = h / 2 + Math.cos(seed + i * 1.2) * edge;
+        ctx.lineTo(x, y);
+      }
+      for (let i = 5; i >= 0; i--) {
+        const x = -w / 2 + Math.cos(seed + i) * edge * 0.55;
+        const y = -h / 2 + (h * i) / 5;
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+    }
+
+    function roundedRectPath(x, y, w, h, radius) {
+      const r = Math.min(radius, w * 0.5, h * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    }
+
+    function wrapText(text, maxWidth, font) {
+      ctx.font = font;
+      const chars = [...text];
+      const lines = [];
+      let line = "";
+      for (const char of chars) {
+        const test = line + char;
+        if (ctx.measureText(test).width > maxWidth && line) {
+          lines.push(line);
+          line = char;
+        } else {
+          line = test;
+        }
+      }
+      if (line) lines.push(line);
+      return lines;
+    }
+
+    function drawOpenPaper(ball) {
+      const t = ball.open;
+      if (t <= 0.01) return;
+      const ease = 1 - (1 - t) ** 3;
+      const maxW = Math.min(state.width * 0.64, 560);
+      const maxH = Math.min(state.height * 0.52, 360);
+      const w = lerp(ball.r * 2.1, maxW, ease);
+      const h = lerp(ball.r * 1.9, maxH, ease);
+      const x = lerp(ball.x, state.width * 0.5, ease * 0.74);
+      const y = lerp(ball.y - 20, state.height * 0.48, ease * 0.82);
+      const rotate = ball.angle * (1 - ease) + Math.sin(ball.seed) * 0.03 * ease;
+      const fold = Math.sin(ease * Math.PI) * 22;
+
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(ball.trashScale || 1, ball.trashScale || 1);
+      ctx.rotate(rotate);
+
+      ctx.save();
+      ctx.translate(14, 22);
+      ctx.globalAlpha = 0.28 * ease;
+      ctx.fillStyle = "#000000";
+      traceSheetPath(w, h, ball.seed + 8, fold);
+      ctx.fill();
+      ctx.restore();
+
+      traceSheetPath(w, h, ball.seed, fold);
+
+      const pg = ctx.createLinearGradient(-w / 2, -h / 2, w / 2, h / 2);
+      pg.addColorStop(0, "#ffffff");
+      pg.addColorStop(0.52, "#f3f3f0");
+      pg.addColorStop(1, "#ddddda");
+      ctx.fillStyle = pg;
+      ctx.fill();
+
+      ctx.save();
+      ctx.clip();
+      if (textures.sheet.complete && textures.sheet.naturalWidth) {
+        ctx.globalAlpha = 0.72;
+        const img = textures.sheet;
+        const sx = img.naturalWidth * 0.08;
+        const sy = img.naturalHeight * 0.04;
+        const sw = img.naturalWidth * 0.84;
+        const sh = img.naturalHeight * 0.72;
+        ctx.drawImage(img, sx, sy, sw, sh, -w / 2 - 8, -h / 2 - 8, w + 16, h + 16);
+      } else {
+        ctx.globalAlpha = 0.24;
+        ctx.strokeStyle = "#a89e8d";
+        ctx.lineWidth = 1;
+        for (let i = -3; i <= 4; i++) {
+          ctx.beginPath();
+          ctx.moveTo(-w / 2 + 26, i * h * 0.14);
+          ctx.quadraticCurveTo(0, i * h * 0.14 + Math.sin(i + ball.seed) * 9, w / 2 - 28, i * h * 0.14 - 4);
+          ctx.stroke();
+        }
+      }
+
+      ctx.globalCompositeOperation = "multiply";
+      ctx.lineCap = "round";
+      for (let i = 0; i < 24; i++) {
+        const a = ball.seed * 0.8 + i * 1.73;
+        const x = -w * 0.47 + (((i * 53) % 100) / 100) * w * 0.94;
+        const y = -h * 0.46 + (((i * 37) % 100) / 100) * h * 0.43;
+        const len = w * (0.12 + ((i * 17) % 62) / 300);
+        ctx.globalAlpha = i % 3 === 0 ? 0.11 : 0.07;
+        ctx.strokeStyle = i % 4 === 0 ? "rgba(78, 78, 72, 0.54)" : "rgba(178, 178, 168, 0.68)";
+        ctx.lineWidth = 0.9 + (i % 3) * 0.35;
+        ctx.beginPath();
+        ctx.moveTo(x - Math.cos(a) * len * 0.5, y - Math.sin(a) * len * 0.5);
+        ctx.quadraticCurveTo(
+          x + Math.sin(a) * 14,
+          y - Math.cos(a) * 10,
+          x + Math.cos(a) * len * 0.5,
+          y + Math.sin(a) * len * 0.5
+        );
+        ctx.stroke();
+      }
+
+      for (let i = 0; i < 9; i++) {
+        const x = -w * 0.48 + (((i * 29) % 100) / 100) * w * 0.96;
+        const y = -h * 0.43 + (((i * 41) % 100) / 100) * h * 0.36;
+        const size = w * (0.075 + (i % 4) * 0.018);
+        ctx.globalAlpha = 0.045 + (i % 3) * 0.014;
+        ctx.fillStyle = i % 2 ? "rgba(82, 82, 76, 0.72)" : "rgba(190, 190, 180, 0.78)";
+        ctx.beginPath();
+        ctx.moveTo(x, y - size * 0.46);
+        ctx.lineTo(x + size * 0.58, y + size * 0.16);
+        ctx.lineTo(x - size * 0.36, y + size * 0.44);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      ctx.globalCompositeOperation = "screen";
+      for (let i = 0; i < 12; i++) {
+        const a = -0.9 + i * 0.18 + Math.sin(ball.seed + i) * 0.34;
+        const x = -w * 0.48 + (((i * 67) % 100) / 100) * w * 0.96;
+        const y = -h * 0.46 + (((i * 31) % 100) / 100) * h * 0.42;
+        const len = h * (0.16 + (i % 4) * 0.03);
+        ctx.globalAlpha = 0.075;
+        ctx.strokeStyle = "rgba(255, 255, 255, 0.86)";
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(x - Math.cos(a) * len * 0.45, y - Math.sin(a) * len * 0.45);
+        ctx.lineTo(x + Math.cos(a) * len * 0.55, y + Math.sin(a) * len * 0.55);
+        ctx.stroke();
+      }
+
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = 0.13;
+      const topCrush = ctx.createLinearGradient(0, -h * 0.5, 0, h * 0.05);
+      topCrush.addColorStop(0, "rgba(95, 95, 88, 0.22)");
+      topCrush.addColorStop(0.34, "rgba(255, 255, 255, 0.04)");
+      topCrush.addColorStop(0.66, "rgba(112, 112, 105, 0.16)");
+      topCrush.addColorStop(1, "rgba(255, 255, 255, 0)");
+      ctx.fillStyle = topCrush;
+      ctx.fillRect(-w / 2, -h / 2, w, h * 0.58);
+      ctx.globalCompositeOperation = "source-over";
+
+      ctx.globalAlpha = 0.20;
+      ctx.lineWidth = 1.1;
+      for (let i = 0; i < 18; i++) {
+        const a = ball.seed + i * 2.17;
+        const x = -w * 0.46 + ((i * 71) % 100) / 100 * w * 0.92;
+        const y = -h * 0.42 + ((i * 47) % 100) / 100 * h * 0.84;
+        const len = w * (0.10 + ((i * 19) % 70) / 360);
+        ctx.strokeStyle = i % 3 === 0 ? "rgba(255,255,255,0.72)" : "rgba(86,86,86,0.34)";
+        ctx.beginPath();
+        ctx.moveTo(x - Math.cos(a) * len * 0.5, y - Math.sin(a) * len * 0.5);
+        ctx.quadraticCurveTo(
+          x + Math.sin(a) * 8,
+          y - Math.cos(a) * 8,
+          x + Math.cos(a) * len * 0.5,
+          y + Math.sin(a) * len * 0.5
+        );
+        ctx.stroke();
+      }
+
+      ctx.globalCompositeOperation = "multiply";
+      ctx.globalAlpha = 0.12;
+      const paperShade = ctx.createLinearGradient(-w * 0.5, -h * 0.5, w * 0.5, h * 0.5);
+      paperShade.addColorStop(0, "#ffffff");
+      paperShade.addColorStop(0.55, "#d0d0d0");
+      paperShade.addColorStop(1, "#8d8d8d");
+      ctx.fillStyle = paperShade;
+      ctx.fillRect(-w / 2, -h / 2, w, h);
+      ctx.globalCompositeOperation = "source-over";
+
+      ctx.globalAlpha = 0.24;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.28, -h * 0.5);
+      ctx.quadraticCurveTo(-w * 0.08, -h * 0.06, -w * 0.36, h * 0.48);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(w * 0.3, -h * 0.48);
+      ctx.quadraticCurveTo(w * 0.12, -h * 0.02, w * 0.34, h * 0.44);
+      ctx.stroke();
+      ctx.restore();
+
+      if (ease > 0.62) {
+        const textAlpha = clamp((ease - 0.62) / 0.28, 0, 1);
+        const textLength = Array.from(String(ball.note).replace(/\s/g, "")).length;
+        const targetSize = textLength < 10 ? 48 : textLength <= 16 ? 42 : 36;
+        let fontSize = clamp(Math.min(targetSize, Math.floor(w / 11.4)), textLength > 16 ? 34 : 36, targetSize);
+        let lines = wrapText(ball.note, w * 0.76, `600 ${fontSize}px ${FONT_ANSWER}`);
+        if (lines.length > 3) {
+          fontSize = Math.max(34, fontSize - 2);
+          lines = wrapText(ball.note, w * 0.84, `600 ${fontSize}px ${FONT_ANSWER}`).slice(0, 3);
+        }
+        const lineHeight = fontSize * 1.45;
+        ctx.save();
+        ctx.globalAlpha = textAlpha;
+        ctx.fillStyle = "#3B2B22";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.font = `600 ${fontSize}px ${FONT_ANSWER}`;
+        const startY = -(lines.length - 1) * lineHeight * 0.5;
+        lines.forEach((line, i) => ctx.fillText(line, 0, startY + i * lineHeight));
+        ctx.restore();
+      }
+
+      ctx.restore();
+    }
+
+    function drawTrashBin() {
+      const bin = trashBinTarget();
+      const x = bin.x;
+      const y = bin.y;
+      const w = bin.w;
+      const h = bin.h;
+      const activeDrop = Boolean(state.opened) && !state.trash;
+      const shake = state.trashShake || 0;
+      ctx.save();
+      ctx.translate(x, y);
+      if (shake > 0.01) {
+        ctx.translate(Math.sin(performance.now() * 0.055) * 6 * shake, Math.cos(performance.now() * 0.061) * 3 * shake);
+        ctx.rotate(Math.sin(performance.now() * 0.05) * 0.035 * shake);
+      }
+      ctx.scale(activeDrop ? 1.12 : 1, activeDrop ? 1.12 : 1);
+      ctx.globalAlpha = activeDrop ? 0.98 : 0.86;
+
+      ctx.save();
+      ctx.translate(6, h * 0.42);
+      ctx.scale(1.2, 0.42);
+      ctx.fillStyle = "rgba(0, 0, 0, 0.22)";
+      ctx.beginPath();
+      ctx.arc(0, 0, w * 0.48, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      const bodyPath = () => {
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.46, -h * 0.36);
+        ctx.lineTo(-w * 0.34, h * 0.36);
+        ctx.quadraticCurveTo(0, h * 0.48, w * 0.34, h * 0.36);
+        ctx.lineTo(w * 0.46, -h * 0.36);
+        ctx.closePath();
+      };
+
+      if (activeDrop || state.trash) {
+        ctx.save();
+        ctx.globalAlpha = activeDrop ? 0.72 : 0.48;
+        ctx.strokeStyle = "rgba(255, 219, 137, 0.94)";
+        ctx.lineWidth = activeDrop ? 5 : 4;
+        ctx.shadowColor = "rgba(255, 211, 117, 0.72)";
+        ctx.shadowBlur = activeDrop ? 28 : 18;
+        ctx.beginPath();
+        ctx.ellipse(0, -h * 0.38, w * 0.55, h * 0.13, 0, Math.PI, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+
+        ctx.save();
+        ctx.globalAlpha = activeDrop ? 0.24 : 0.12;
+        ctx.fillStyle = "rgba(255, 212, 121, 0.42)";
+        ctx.shadowColor = "rgba(255, 211, 117, 0.62)";
+        ctx.shadowBlur = 28;
+        ctx.beginPath();
+        ctx.ellipse(0, -h * 0.38, w * 0.62, h * 0.18, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      ctx.save();
+      bodyPath();
+      ctx.clip();
+      ctx.globalAlpha = 0.82;
+      ctx.fillStyle = "rgba(37, 31, 25, 0.20)";
+      ctx.fillRect(-w * 0.48, -h * 0.34, w * 0.96, h * 0.86);
+
+      const drawMiniTrashBall = (scrap) => {
+        ctx.save();
+        ctx.translate(scrap.x * w, scrap.y * h);
+        ctx.rotate(scrap.a);
+        const sr = scrap.r * w;
+        ctx.save();
+        ctx.translate(sr * 0.18, sr * 0.24);
+        ctx.scale(1.12, 0.52);
+        ctx.fillStyle = "rgba(0, 0, 0, 0.16)";
+        ctx.beginPath();
+        ctx.arc(0, 0, sr * 0.9, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+
+        ctx.fillStyle = "rgba(236, 233, 222, 0.92)";
+        ctx.strokeStyle = "rgba(122, 119, 108, 0.32)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        for (let i = 0; i < 9; i++) {
+          const t = (i / 9) * Math.PI * 2;
+          const rr = sr * (0.78 + Math.sin(i * 2.1) * 0.18);
+          const px = Math.cos(t) * rr;
+          const py = Math.sin(t) * rr * 0.72;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        ctx.globalAlpha = 0.38;
+        ctx.strokeStyle = "rgba(92, 92, 88, 0.55)";
+        ctx.beginPath();
+        ctx.moveTo(-sr * 0.45, -sr * 0.05);
+        ctx.lineTo(sr * 0.44, sr * 0.12);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(-sr * 0.10, -sr * 0.45);
+        ctx.lineTo(sr * 0.18, sr * 0.42);
+        ctx.stroke();
+        ctx.restore();
+      };
+
+      const trashPile = [
+        { x: -0.30, y: 0.23, r: 0.16, a: -0.4 },
+        { x: -0.12, y: 0.25, r: 0.18, a: 0.5 },
+        { x: 0.10, y: 0.25, r: 0.17, a: -0.2 },
+        { x: 0.30, y: 0.22, r: 0.15, a: 0.35 },
+        { x: -0.23, y: 0.08, r: 0.14, a: 0.2 },
+        { x: -0.02, y: 0.08, r: 0.16, a: -0.7 },
+        { x: 0.21, y: 0.08, r: 0.14, a: 0.72 },
+        { x: -0.11, y: -0.06, r: 0.13, a: -0.15 },
+        { x: 0.08, y: -0.07, r: 0.13, a: 0.45 }
+      ];
+      for (const scrap of trashPile) {
+        drawMiniTrashBall(scrap);
+      }
+
+      ctx.globalAlpha = 0.52;
+      ctx.fillStyle = "rgba(244, 241, 232, 0.86)";
+      for (let i = 0; i < 7; i++) {
+        const px = (-0.34 + i * 0.11) * w;
+        const py = (0.13 + Math.sin(i * 1.7) * 0.08) * h;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(-0.7 + i * 0.31);
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.045, -h * 0.018);
+        ctx.lineTo(w * 0.045, -h * 0.010);
+        ctx.lineTo(w * 0.030, h * 0.026);
+        ctx.lineTo(-w * 0.036, h * 0.018);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+      ctx.restore();
+
+      ctx.strokeStyle = "rgba(226, 236, 226, 0.62)";
+      ctx.lineWidth = 2;
+      ctx.lineJoin = "round";
+      bodyPath();
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.38;
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * w * 0.16, -h * 0.28);
+        ctx.lineTo(i * w * 0.10, h * 0.34);
+        ctx.stroke();
+      }
+      for (let i = 0; i < 4; i++) {
+        const yy = -h * 0.20 + i * h * 0.16;
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.38 + i * 1.5, yy);
+        ctx.quadraticCurveTo(0, yy + 8, w * 0.38 - i * 1.5, yy);
+        ctx.stroke();
+      }
+
+      ctx.globalAlpha = 0.76;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(-w * 0.52, -h * 0.40);
+      ctx.quadraticCurveTo(0, -h * 0.50, w * 0.52, -h * 0.40);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    function drawTrashHint() {
+      if (!state.opened || state.trash) return;
+      const bin = trashBinTarget();
+      ctx.save();
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.font = `400 ${clamp(Math.floor(Math.min(state.width, state.height) * 0.019), 14, 16)}px ${FONT_UI}`;
+      ctx.fillStyle = "rgba(255, 255, 255, 0.82)";
+      ctx.shadowColor = "rgba(55, 25, 8, 0.55)";
+      ctx.shadowBlur = 12;
+      const x = Math.min(state.width - 24, bin.x + bin.w * 0.54);
+      const y = Math.max(150, bin.y - bin.h * 0.72);
+      ctx.fillText("不满意？双手揉掉扔进废纸篓重抽", x, y);
+      ctx.restore();
+    }
+
+    function render(time) {
+      drawBackground(time);
+      const pointer = currentPointer();
+      updateGestureCursor(pointer);
+      drawCenterConfirmZone();
+      drawTrashHint();
+      drawTrashBin();
+
+      const dimOthers = state.opened || (state.grabbed && state.grabbed.open > 0.22);
+      const sorted = [...state.balls].sort((a, b) => (a.y + a.lift * 90) - (b.y + b.lift * 90));
+
+      for (const ball of sorted) {
+        if (ball.hidden || ball.trashing) continue;
+        if (ball.open > 0.02) continue;
+        ctx.save();
+        if (dimOthers && ball !== state.grabbed) ctx.globalAlpha = 0.34;
+        drawCrumpledBall(ball);
+        ctx.restore();
+      }
+
+      const activePaper = state.opened || state.grabbed;
+      if (activePaper) {
+        if (activePaper.open < 0.92) drawCrumpledBall(activePaper);
+        drawOpenPaper(activePaper);
+      }
+
+      if (state.trash) {
+        const ball = state.trash.ball;
+        if (ball.open > 0.02) drawOpenPaper(ball);
+        else drawCrumpledBall(ball);
+      }
+
+    }
+
+    let lastFrame = performance.now();
+    function frame(time) {
+      const dt = Math.min(34, time - lastFrame);
+      lastFrame = time;
+      update(dt);
+      render(time);
+      requestAnimationFrame(frame);
+    }
+
+    canvas.addEventListener("pointerenter", (event) => {
+      state.mouse.active = true;
+      state.mouse.x = event.clientX;
+      state.mouse.y = event.clientY;
+    });
+
+    canvas.addEventListener("pointermove", (event) => {
+      state.mouse.active = true;
+      state.mouse.x = event.clientX;
+      state.mouse.y = event.clientY;
+    });
+
+    canvas.addEventListener("pointerleave", () => {
+      state.mouse.active = false;
+      state.mouse.down = false;
+    });
+
+    canvas.addEventListener("pointerdown", (event) => {
+      state.mouse.active = true;
+      state.mouse.down = true;
+      state.mouse.x = event.clientX;
+      state.mouse.y = event.clientY;
+      if (!state.hand && !state.opened && !state.trash && performance.now() >= state.trashCooldownUntil) {
+        const pointer = {
+          active: true,
+          index: { x: state.mouse.x, y: state.mouse.y },
+          pinchPoint: { x: state.mouse.x, y: state.mouse.y },
+          pinch: true,
+          pinchRelaxed: true,
+          openPalm: false
+        };
+        state.selected = selectBall(pointer);
+        if (state.selected) {
+          state.grabbed = state.selected;
+          state.grabbed.pickAge = 0;
+          state.grabbed.settled = false;
+          state.grabbed.settleFrames = 0;
+          state.grabbed.open = 0;
+          state.centerConfirmProgress = 0;
+          state.pinchStartedAt = performance.now();
+        }
+      }
+      canvas.setPointerCapture(event.pointerId);
+    });
+
+    canvas.addEventListener("pointerup", (event) => {
+      state.mouse.down = false;
+      if (!state.hand && state.grabbed && !state.opened && !state.trash && performance.now() >= state.trashCooldownUntil) {
+        if (isInCenterConfirmZone(state.grabbed) && state.centerConfirmProgress > 0.72) {
+          openBall(state.grabbed);
+        } else {
+          state.grabbed.lift = 0;
+          state.grabbed = null;
+          state.centerConfirmProgress = 0;
+        }
+      }
+      if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
+    });
+
+    window.addEventListener("resize", resize);
+    setupSceneSelect();
+    setupSceneManager();
+    setupCameraCard();
+    setupFullscreen();
+    setupShareActions();
+    resize();
+    requestAnimationFrame(frame);
+    startCamera();
+  </script>
+</body>
+</html>
